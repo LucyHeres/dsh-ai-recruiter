@@ -1,0 +1,462 @@
+{
+  "position": {
+    "item": {
+      "ref": "e58",
+      "role": "StaticText",
+      "name": "java开发-zidi",
+      "states": [],
+      "parentRef": "e57"
+    },
+    "inspection": {
+      "item": {
+        "bounds": {
+          "height": 20,
+          "width": 56,
+          "x": 208,
+          "y": 86
+        },
+        "name": "java开发-zidi",
+        "ref": "e58",
+        "role": "generic",
+        "states": [],
+        "tagName": "div"
+      },
+      "element": {
+        "attributes": {
+          "class": "job-title"
+        },
+        "bounds": {
+          "height": 20,
+          "width": 56,
+          "x": 208,
+          "y": 86
+        },
+        "css": {
+          "display": "block",
+          "overflowX": "hidden",
+          "overflowY": "hidden",
+          "pointerEvents": "auto",
+          "position": "static",
+          "visibility": "visible"
+        },
+        "tagName": "div",
+        "text": "java开发-zidi",
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "attributes": {
+            "class": "ant-lpt-dropdown-trigger dropdown-button"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 96,
+            "x": 188,
+            "y": 80
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "java开发-zidi",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "search-page-select-jobs-wrap wrap--YWQ3N"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 76,
+            "x": 208,
+            "y": 80
+          },
+          "css": {
+            "display": "block",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "relative",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "java开发-zidi",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "selectJobWrap--XzJmN"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 93,
+            "x": 208,
+            "y": 80
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "java开发-zidi",
+          "visible": true
+        }
+      ]
+    }
+  },
+  "city": {
+    "item": {
+      "ref": "e89",
+      "role": "StaticText",
+      "name": "武汉",
+      "states": [],
+      "parentRef": "e88"
+    },
+    "inspection": {
+      "item": {
+        "bounds": {
+          "height": 19.59375,
+          "width": 28,
+          "x": 336,
+          "y": 222.203125
+        },
+        "name": "武汉",
+        "ref": "e89",
+        "role": "generic",
+        "states": [],
+        "tagName": "label"
+      },
+      "element": {
+        "attributes": {
+          "class": "active--XzZiZ"
+        },
+        "bounds": {
+          "height": 19.59375,
+          "width": 28,
+          "x": 336,
+          "y": 222.203125
+        },
+        "css": {
+          "display": "block",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "pointerEvents": "auto",
+          "position": "static",
+          "visibility": "visible"
+        },
+        "tagName": "label",
+        "text": "武汉",
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "attributes": {
+            "class": "checkboxBox--XzZiZ"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 216
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 武汉 其他",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "content--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 216
+          },
+          "css": {
+            "display": "block",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 武汉 其他",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "wrap--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1212,
+            "x": 188,
+            "y": 216
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "期望城市 不限 武汉 其他",
+          "visible": true
+        }
+      ]
+    }
+  },
+  "education": {
+    "item": {
+      "ref": "e109",
+      "role": "StaticText",
+      "name": "本科",
+      "states": [],
+      "parentRef": "e108"
+    },
+    "inspection": {
+      "item": {
+        "bounds": {
+          "height": 19.59375,
+          "width": 28,
+          "x": 336,
+          "y": 302.203125
+        },
+        "name": "本科",
+        "ref": "e109",
+        "role": "generic",
+        "states": [],
+        "tagName": "label"
+      },
+      "element": {
+        "attributes": {
+          "class": "search-page-filter-item"
+        },
+        "bounds": {
+          "height": 19.59375,
+          "width": 28,
+          "x": 336,
+          "y": 302.203125
+        },
+        "css": {
+          "display": "block",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "pointerEvents": "auto",
+          "position": "static",
+          "visibility": "visible"
+        },
+        "tagName": "label",
+        "text": "本科",
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "attributes": {
+            "class": "search-page-filter-content"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "content--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "block",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "wrap--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1212,
+            "x": 188,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "教育经历 不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        }
+      ]
+    }
+  },
+  "inactiveConfirm": {
+    "item": {
+      "ref": "e67",
+      "role": "button",
+      "name": "确定",
+      "states": [],
+      "parentRef": "e57"
+    },
+    "inspection": {
+      "item": {
+        "bounds": {
+          "height": 24,
+          "width": 40,
+          "x": 598,
+          "y": 140
+        },
+        "name": "确定",
+        "ref": "e67",
+        "role": "button",
+        "states": [
+          "occluded"
+        ],
+        "tagName": "button"
+      },
+      "element": {
+        "attributes": {
+          "class": "ant-lpt-btn ant-lpt-btn-primary ant-lpt-btn-sm confirmBtn--XzljO ant-lpt-teno-btn",
+          "type": "button"
+        },
+        "bounds": {
+          "height": 24,
+          "width": 40,
+          "x": 598,
+          "y": 140
+        },
+        "css": {
+          "display": "flex",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "pointerEvents": "none",
+          "position": "relative",
+          "visibility": "visible"
+        },
+        "tagName": "button",
+        "text": "确定",
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "attributes": {
+            "class": "boxShadow--XzljO"
+          },
+          "bounds": {
+            "height": 48,
+            "width": 386,
+            "x": 264,
+            "y": 128
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "none",
+            "position": "absolute",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "确定",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "inputGroup--XzljO"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 312,
+            "x": 276,
+            "y": 136
+          },
+          "css": {
+            "display": "inline-flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "relative",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "确定 全部职位",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "wrap--XzgzN",
+            "id": "cur-jobsearch-wrap"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 400,
+            "x": 188,
+            "y": 136
+          },
+          "css": {
+            "display": "block",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "relative",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "职 位 确定 全部职位",
+          "visible": true
+        }
+      ]
+    }
+  }
+}

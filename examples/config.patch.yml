@@ -1,0 +1,25 @@
+# 可选：合并到薪灵当前 profile 的 cordis.patch.yml。
+# companyKey 用于本地记录隔离，不是权限凭据。
+
+- id: dsh-ai-recruiter
+  config:
+    serverName: xrxs
+    companyKey: company-example
+    stateDirectory: ''
+    # 薪人薪事业务域名：预上传解析/提交这些业务接口打到这里，不是 MCP 域名。
+    systemUrl: '' # 跟随当前公司授权的 systemURL
+    # 默认使用插件包内网关；配对文件为 ~/.xinzhao/browser-agent.local.json。
+    # 通常无需配置。只有显式使用其他 MCP 时才填写：
+    # browserMcpArgs:
+    #   - /absolute/path/to/mcp-server.js
+    browserTimeoutMs: 120000
+    # 浏览器任务默认仅在模型声明支持时使用 low；inherit 完全沿用宿主档位。
+    browserAgentReasoningEffort: auto-low
+    # 如需专用快速模型，两项一起填写宿主已配置的 route ID；留空沿用默认模型。
+    browserAgentProvider: ''
+    browserAgentModel: ''
+    # 私有部署才需追加精确 HTTPS origin，上传路径仍固定为 /site/upload。
+    fileUploadOrigins: []
+    # 沟通节奏与本机额度；模型不能修改。
+    greetingDailyLimit: 100
+    # 打招呼点击之间固定至少 5 秒；不再随机等待或分组暂停。

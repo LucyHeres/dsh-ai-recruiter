@@ -1,0 +1,918 @@
+{
+  "source": "Captured Liepin recommendation filter drawer, UI-only; no candidate data",
+  "page": {
+    "tabId": 1,
+    "snapshotId": "filter",
+    "url": "https://lpt.liepin.com/recommend",
+    "format": "dom",
+    "items": [
+      {
+        "ref": "ref_5",
+        "role": "button",
+        "tagName": "button",
+        "name": "确定",
+        "parentRef": "ref_1",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_12",
+        "role": "span",
+        "tagName": "span",
+        "name": "确定",
+        "parentRef": "ref_5",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_14",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_13",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_22",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_21",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_24",
+        "role": "span",
+        "tagName": "span",
+        "name": "高中",
+        "parentRef": "ref_21",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_25",
+        "role": "span",
+        "tagName": "span",
+        "name": "中专/中技",
+        "parentRef": "ref_21",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_26",
+        "role": "span",
+        "tagName": "span",
+        "name": "大专",
+        "parentRef": "ref_21",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_27",
+        "role": "span",
+        "tagName": "span",
+        "name": "本科",
+        "parentRef": "ref_21",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_28",
+        "role": "span",
+        "tagName": "span",
+        "name": "硕士",
+        "parentRef": "ref_21",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_30",
+        "role": "span",
+        "tagName": "span",
+        "name": "博士",
+        "parentRef": "ref_21",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_32",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_31",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_43",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_42",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_49",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_48",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_61",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_60",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_65",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_64",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_71",
+        "role": "span",
+        "tagName": "span",
+        "name": "不限",
+        "parentRef": "ref_70",
+        "dialogRef": "ref_1",
+        "states": [
+          "enabled"
+        ]
+      },
+      {
+        "ref": "ref_1",
+        "role": "dialog",
+        "name": "筛选条件 重置 确定 工作经验 不限 1年以下 1-3年 3-5年 5-10年 10年以上 自定义 学历要求 不限 初中及以下 高中 中专/中技 大专 本科 硕士 MBA/EMBA 博士 薪资范围（单选） 不限 5K以下 5-8K 8-10K 10-15K 15-20K 20-30K 30-50K 50K以上 自定义 跳槽频率（单选） 不限 近5年不超过3段 近3年不超过2段 近2段均不低于2年 行业类别 查看更多 不限 互联网 计算机软件 IT服务 电子商务 科技金融 年龄 性别（单选） 不限 男 女 院校 不限 985 211 双一流院校 海外名校 求职状态 不限 离职，正在找工作 在职，急寻新工作 在职，看看新机会 在职，暂无跳槽打算",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_13",
+        "role": "div",
+        "name": "不限 1年以下 1-3年 3-5年 5-10年 10年以上 自定义",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_21",
+        "role": "div",
+        "name": "不限 初中及以下 高中 中专/中技 大专 本科 硕士 MBA/EMBA 博士",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_31",
+        "role": "div",
+        "name": "不限 5K以下 5-8K 8-10K 10-15K 15-20K 20-30K 30-50K 50K以上 自定义",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_42",
+        "role": "div",
+        "name": "不限 近5年不超过3段 近3年不超过2段 近2段均不低于2年",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_48",
+        "role": "div",
+        "name": "不限 互联网 计算机软件 IT服务 电子商务 科技金融",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_60",
+        "role": "div",
+        "name": "不限 男 女",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_64",
+        "role": "div",
+        "name": "不限 985 211 双一流院校 海外名校",
+        "dialogRef": "ref_1",
+        "states": []
+      },
+      {
+        "ref": "ref_70",
+        "role": "div",
+        "name": "不限 离职，正在找工作 在职，急寻新工作 在职，看看新机会 在职，暂无跳槽打算",
+        "dialogRef": "ref_1",
+        "states": []
+      }
+    ],
+    "dialogs": [
+      {
+        "ref": "ref_1",
+        "text": "筛选条件 重置 确定 工作经验 不限 1年以下 1-3年 3-5年 5-10年 10年以上 自定义 学历要求 不限 初中及以下 高中 中专/中技 大专 本科 硕士 MBA/EMBA 博士 薪资范围（单选） 不限 5K以下 5-8K 8-10K 10-15K 15-20K 20-30K 30-50K 50K以上 自定义 跳槽频率（单选） 不限 近5年不超过3段 近3年不超过2段 近2段均不低于2年 行业类别 查看更多 不限 互联网 计算机软件 IT服务 电子商务 科技金融 年龄 性别（单选） 不限 男 女 院校 不限 985 211 双一流院校 海外名校 求职状态 不限 离职，正在找工作 在职，急寻新工作 在职，看看新机会 在职，暂无跳槽打算",
+        "closeRef": "ref_2"
+      }
+    ]
+  },
+  "inspections": [
+    {
+      "ref": "ref_5",
+      "element": {
+        "tagName": "button",
+        "attributes": {
+          "class": "ant-lpt-btn ant-lpt-btn-primary ant-lpt-teno-btn",
+          "type": "button"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-space-item"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-space ant-lpt-space-horizontal ant-lpt-space-align-center"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-extra"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-header"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_12",
+      "element": {
+        "tagName": "span",
+        "attributes": {},
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "button",
+          "attributes": {
+            "class": "ant-lpt-btn ant-lpt-btn-primary ant-lpt-teno-btn",
+            "type": "button"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-space-item"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-space ant-lpt-space-horizontal ant-lpt-space-align-center"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-extra"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-header"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_14",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_22",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_27",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_28",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_32",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_43",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked jobFrequencyItem--XzIxY ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_49",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked jobFrequencyItem--XzIxY ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_61",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked jobFrequencyItem--XzIxY genderItem--XzIxY ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_65",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    },
+    {
+      "ref": "ref_71",
+      "element": {
+        "tagName": "span",
+        "attributes": {
+          "class": "ant-lpt-tag ant-lpt-tag-checkable ant-lpt-tag-checkable-checked ant-lpt-teno-tag ant-lpt-teno-tag-checkable ant-lpt-teno-tag-middle"
+        },
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "itemsWraper--XzIxY itemsLongWraper--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "filterItems--XzIxY"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-wrapper-body"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content",
+            "role": "dialog"
+          },
+          "visible": true
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "ant-lpt-drawer-content-wrapper"
+          },
+          "visible": true
+        }
+      ]
+    }
+  ]
+}

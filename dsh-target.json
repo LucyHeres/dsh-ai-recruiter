@@ -1,0 +1,9 @@
+{
+  "dshVersion": "0.1.6-alpha.1",
+  "cordisVersion": "4.0.2",
+  "toolsVersion": "0.1.6-alpha.1",
+  "schemaVersion": "3.18.2",
+  "surface": "host+client",
+  "note": "Host tools plus DSH lazy-CJS workbench client. See docs/workbench.md for validation and adapter limits.",
+  "targetClient": "Xinling 1.0.2"
+}

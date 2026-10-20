@@ -1,0 +1,21 @@
+/* The conversation entry mounts before the drawer, so it owns its scoped styles. */
+.air-session-entry { display: inline-flex; flex: none; align-items: center; vertical-align: middle; color-scheme: inherit; font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+.air-session-entry .air-session-entry-trigger {
+  --entry-ink: light-dark(#48505e, #c4c9d3);
+  --entry-surface: light-dark(#f2f3f6, #2b2e36);
+  --entry-border: light-dark(#e3e5eb, #414550);
+  display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; box-sizing: border-box;
+  height: 28px; margin: 0; padding: 0 9px; border: 1px solid var(--entry-border); border-radius: 999px;
+  appearance: none; background: var(--entry-surface); color: var(--entry-ink); font: inherit; font-weight: 500; line-height: 1; white-space: nowrap;
+  cursor: pointer; touch-action: manipulation; transition: transform .1s ease;
+}
+.air-session-entry-trigger:is([data-state="queued"], [data-state="running"], [data-state="stopping"]) { --entry-ink: light-dark(#6d28d9, #c4a8fa); --entry-surface: light-dark(#f4f0fc, #30283e); --entry-border: light-dark(#e6dcf7, #514064); }
+.air-session-entry-trigger:is([data-state="failed"], [data-state="unknown"], [data-state="error"]) { --entry-ink: light-dark(#86521c, #e3ba80); --entry-surface: light-dark(#fcf5e9, #352c20); --entry-border: light-dark(#ebdcc6, #63513b); }
+.air-session-entry .air-session-entry-trigger:hover { background: color-mix(in srgb, var(--entry-ink) 8%, var(--entry-surface)); border-color: color-mix(in srgb, var(--entry-ink) 32%, var(--entry-border)); }
+.air-session-entry .air-session-entry-trigger:active { transform: scale(.98); }
+.air-session-entry .air-session-entry-trigger:focus-visible { outline: 2px solid light-dark(#7c3aed, #b794f6); outline-offset: 2px; }
+.air-session-entry-trigger > svg { display: block; flex: none; width: 14px; height: 14px; }
+.air-session-entry-trigger > .air-session-entry-chevron { width: 12px; height: 12px; opacity: .7; }
+.air-session-entry-state { border-left: 1px solid color-mix(in srgb, var(--entry-ink) 22%, transparent); padding-left: 6px; font-size: 11px; font-weight: 400; }
+.air-session-entry-error { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: reduce) { .air-session-entry .air-session-entry-trigger { transition: none; } .air-session-entry .air-session-entry-trigger:active { transform: none; } }

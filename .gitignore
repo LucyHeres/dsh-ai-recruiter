@@ -1,0 +1,12 @@
+node_modules/
+dist/
+artifacts/
+.DS_Store
+examples/.demo-state/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+*.pem
+*.key

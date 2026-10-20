@@ -1,0 +1,12 @@
+{
+  "source": "xinzhao/tools/browser-agent-gateway",
+  "files": {
+    "gateway.js": "f61842dbe4f43b88cb386ceb723a9e936a2eef6db7d0b06ff0f01d631e07be05",
+    "ws-server.js": "a73168cd8d23e8258a8a91cadc732e5bba03032a502ca8199b2c93b0a7a07b7d",
+    "protocol.js": "43922aa45c0b729f47d70338b0b4b8b3146e4f6160a896e92ad030cc29c407a2",
+    "mcp-server.js": "8fbf4ed305aa2f2b104d56cdacdf40204dc86985bf1cee139ace98a8e49fb4eb",
+    "ensure.js": "1e4e67b086de3ebb326024420df274959e44b4a9d9a125019fcdcee5d95733f6",
+    "cli.js": "30e902feb0ee5e1b80a3f2b5f542e2cdce7bb17af7e4c0469a28ff99a44b8f5a"
+  },
+  "notes": "Historical origin hashes before migration. The implementation is now maintained only in dsh-ai-recruiter; no upstream copy remains in xinzhao and no build reads that checkout."
+}

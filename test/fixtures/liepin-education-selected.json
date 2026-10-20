@@ -1,0 +1,323 @@
+[
+  {
+    "item": {
+      "ref": "e109",
+      "role": "generic",
+      "name": "本科",
+      "states": [],
+      "bounds": {
+        "height": 19.59375,
+        "width": 28,
+        "x": 336,
+        "y": 302.203125
+      },
+      "tagName": "label"
+    },
+    "inspection": {
+      "element": {
+        "attributes": {
+          "class": "search-page-filter-item search-page-filter-item-active"
+        },
+        "bounds": {
+          "height": 19.59375,
+          "width": 28,
+          "x": 336,
+          "y": 302.203125
+        },
+        "css": {
+          "display": "block",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "pointerEvents": "auto",
+          "position": "static",
+          "visibility": "visible"
+        },
+        "tagName": "label",
+        "text": "本科",
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "attributes": {
+            "class": "search-page-filter-content"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "content--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "block",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "wrap--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1212,
+            "x": 188,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "教育经历 不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        }
+      ]
+    }
+  },
+  {
+    "item": {
+      "ref": "e111",
+      "role": "generic",
+      "name": "硕士",
+      "states": [],
+      "bounds": {
+        "height": 19.59375,
+        "width": 28,
+        "x": 396,
+        "y": 302.203125
+      },
+      "tagName": "label"
+    },
+    "inspection": {
+      "element": {
+        "attributes": {
+          "class": "search-page-filter-item search-page-filter-item-active"
+        },
+        "bounds": {
+          "height": 19.59375,
+          "width": 28,
+          "x": 396,
+          "y": 302.203125
+        },
+        "css": {
+          "display": "block",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "pointerEvents": "auto",
+          "position": "static",
+          "visibility": "visible"
+        },
+        "tagName": "label",
+        "text": "硕士",
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "attributes": {
+            "class": "search-page-filter-content"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "content--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "block",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "wrap--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1212,
+            "x": 188,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "教育经历 不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        }
+      ]
+    }
+  },
+  {
+    "item": {
+      "ref": "e113",
+      "role": "generic",
+      "name": "博士/博士后",
+      "states": [],
+      "bounds": {
+        "height": 19.59375,
+        "width": 74.9375,
+        "x": 456,
+        "y": 302.203125
+      },
+      "tagName": "label"
+    },
+    "inspection": {
+      "element": {
+        "attributes": {
+          "class": "search-page-filter-item search-page-filter-item-active"
+        },
+        "bounds": {
+          "height": 19.59375,
+          "width": 74.9375,
+          "x": 456,
+          "y": 302.203125
+        },
+        "css": {
+          "display": "block",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "pointerEvents": "auto",
+          "position": "static",
+          "visibility": "visible"
+        },
+        "tagName": "label",
+        "text": "博士/博士后",
+        "visible": true
+      },
+      "ancestors": [
+        {
+          "attributes": {
+            "class": "search-page-filter-content"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "content--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1124,
+            "x": 276,
+            "y": 296
+          },
+          "css": {
+            "display": "block",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        },
+        {
+          "attributes": {
+            "class": "wrap--XzY0Z"
+          },
+          "bounds": {
+            "height": 32,
+            "width": 1212,
+            "x": 188,
+            "y": 296
+          },
+          "css": {
+            "display": "flex",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "visibility": "visible"
+          },
+          "tagName": "div",
+          "text": "教育经历 不限 本科 硕士 博士/博士后 大专 中专/中技 高中及以下 统招要求 院校要求",
+          "visible": true
+        }
+      ]
+    }
+  }
+]
