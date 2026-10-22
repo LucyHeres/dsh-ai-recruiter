@@ -4,8 +4,9 @@ import type { GreetingJob } from '../../../shared/workbench.js'
 import { normalized, readableIdentityRef, statesOf } from '../../page-actions.js'
 import type { SourcingSearchFilters } from '../../../shared/sourcing.js'
 import { sourcingEducationLevels, verifySourcingSearchFilters } from '../../sourcing-search.js'
-import { liepinRecommendationControl } from './recommendation-controls.js'
+import { liepinRecommendationControl, recommendationFilterDialog } from './recommendation-controls.js'
 import { verifyPositionEvidence } from '../../position-evidence.js'
+import { positionBusinessIds } from '../../position-controls.js'
 
 type Field = 'city' | 'experience' | 'education' | 'current_city'
 type Control = { kind: 'position' | 'position_confirm' | 'job_option' | 'filter' | 'filter_open' | 'confirm' | 'search'; field?: Field; selected: boolean; active: boolean; expanded: boolean }
@@ -56,7 +57,7 @@ export class LiepinSearchEvidence {
   private recommendation(page: any) { try { return new URL(page.url).pathname.replace(/\/$/, '') === '/recommend' } catch { return false } }
   async inspect(page: any, refs: string[], signal: AbortSignal, reuse = false) {
     if (this.enabled(page)) await this.broker.inspectRefs(page, refs.filter(ref => !this.recommendation(page)
-      || !liepinRecommendationControl(page.items.find((item: any) => item.ref === ref) ?? {}, this.names)), signal, reuse, true)
+      || !liepinRecommendationControl(page.items.find((item: any) => item.ref === ref) ?? {}, this.names, page)), signal, reuse, true)
   }
   control(page: any, ref: string): Control | undefined {
     if (!this.enabled(page)) return
@@ -103,7 +104,7 @@ export class LiepinSearchEvidence {
     if (proof.platformJobId && !matching.some(target => target.id === proof.platformJobId)) return fail('所传关联 ID 不属于当前名称匹配的目标职位')
     // A requested linked ID is a target constraint, not a claim that the UI
     // exposes it. Only explicit job query parameters are business-ID evidence.
-    const observed = [...new URL(page.url).searchParams].filter(([key]) => /^(?:e?jobid|positionid|recruitjobid)$/i.test(key)).map(([, value]) => value)
+    const observed = [...new Set([...positionBusinessIds(page), ...positionBusinessIds(page, item)])]
     if (observed.some(id => !matching.some(target => target.id === id))) return fail('页面暴露的招聘职位 ID 与目标关联冲突')
     const exact = matching.filter(target => target.id && observed.includes(target.id))
     if (exact.length > 1 || !exact.length && matching.length !== 1) return fail('存在同名招聘职位且页面未暴露唯一 ID，无法确认')
@@ -123,11 +124,14 @@ export class LiepinSearchEvidence {
   }
   async scan(page: any, names: string[], expected: SourcingSearchFilters, signal: AbortSignal) {
     this.names = names
+    const recommendation = this.recommendation(page), drawer = recommendationFilterDialog(page)
     const targets = new Set(['不限职位', ...names, expected.city?.split(/[\/／]/).pop()?.replace(/市$/, ''),
       '不限', '本科', '硕士', 'MBA/EMBA', '博士', '博士/博士后', '大专', '高中', '高中及以下', '中专/中技', '搜索', '在校/应届', '1年以下', '1-3年', '3-5年', '5-10年', '10年以上', '确定'])
     const counts = new Map<string, number>()
     const items = page.items.filter((item: any) => {
       const name = normalized(item.name), count = counts.get(name) ?? 0
+      if (recommendation && !drawer && !names.includes(name) && name !== '不限职位') return false
+      if (recommendation && drawer && item.dialogRef !== drawer.ref && !names.includes(name)) return false
       if (!item.ref || !targets.has(name) || name === '确定' && item.role !== 'button' || count >= (name === '不限' ? 4 : name === '确定' ? 6 : 2)) return false
       counts.set(name, count + 1); return true
     }).slice(0, 28)

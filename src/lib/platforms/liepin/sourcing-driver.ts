@@ -1,8 +1,13 @@
 import { setTimeout as delay } from 'node:timers/promises'
+import { belongsToResumeDialog } from '../../resume-detail-identity.js'
+import { platformIdentityKey } from '../../candidate-identity.js'
+import { liepinCandidateIdentity } from './candidate-identity.js'
 import { LiepinSearchEvidence } from './search-evidence.js'
 import { SourcingBrowser, SourcingHandoff, requireSingle } from '../../sourcing/browser.js'
 import type { ResumeLocator, SearchConfirmation, SourcingCard, SourcingDriver, SourcingDriverContext } from '../../sourcing/types.js'
 import { hash } from '../../store.js'
+import { verifyPositionEvidence } from '../../position-evidence.js'
+import { positionChoices, positionNameMatches } from '../../position-controls.js'
 import { assertCandidateQuote } from '../../candidate-evidence.js'
 import { normalized, statesOf } from '../../page-actions.js'
 import { sourcingEducationLevels, sourcingExperienceRange, verifySourcingSearchFilters } from '../../sourcing-search.js'
@@ -12,6 +17,12 @@ import { liepinDefinition } from './definition.js'
 import { recommendationFilterDialog, recommendationFilterLabel } from './recommendation-controls.js'
 
 const readable = (item: any) => item.ref && !statesOf(item).some(s => ['hidden', 'invisible', 'blocked_by_dialog'].includes(s))
+const inViewport = (item: any, page: any) => {
+  if (!readable(item)) return false
+  const b = item.bounds, v = page.viewport
+  if (!b || !v || ![b.x, b.y, b.width, b.height, v.width, v.height].every(Number.isFinite)) return true
+  return b.width > 0 && b.height > 0 && b.x >= 0 && b.y >= 0 && b.x + b.width <= v.width && b.y + b.height <= v.height
+}
 const hasClass = (node: any, name: string) => String(node?.attributes?.class ?? '').split(/\s+/).some(token => token === name || token.startsWith(`${name}--`))
 const nameOf = (text: string) => /(?:^|\s)([\u4e00-\u9fffA-Za-z·*＊]{1,16})\s*(?=\d{2}\s*岁)/.exec(text)?.[1]
 
@@ -24,7 +35,9 @@ export class LiepinSourcingDriver implements SourcingDriver {
   private readonly names: string[]
   private listDocument?: string
   private advanced?: string
+  private stalledAdvances = 0
   private openedSource?: string
+  private cardView?: { page: any; cards: SourcingCard[] }
   private readonly recommendation: boolean
   private readonly entry: string
   constructor(private readonly context: SourcingDriverContext) {
@@ -164,10 +177,14 @@ export class LiepinSourcingDriver implements SourcingDriver {
     const dialog = recommendationFilterDialog(this.page())
     if (dialog) {
       const targets = this.context.job.platformJobs?.liepin?.length ? this.context.job.platformJobs.liepin : [{ id: '', name: this.context.job.jobName || '' }]
-      const matching = (this.page().selectedTabs ?? []).filter((tab: any) => targets.some(target =>
-        (normalized(tab.name) === normalized(target.name) || normalized(tab.name).startsWith(normalized(target.name) + ' '))
-        && (!target.id || String(tab.elementId ?? '').endsWith('-tab-' + target.id))))
-      if (matching.length !== 1) throw new SourcingHandoff('filter_position_context_unverified')
+      // A filter drawer covers the header; its snapshot's selected-tab metadata
+      // retains context. Verify a single named selection without parsing DOM IDs.
+      const tabs = (this.page().selectedTabs ?? []).map((tab: any, index: number) => ({ ...tab, ref: `selected-position-${index}`, role: 'tab', states: ['selected'] }))
+      const contextPage = { ...this.page(), items: tabs, selectedTabs: [] }
+      const matching = tabs.filter((tab: any) => targets.some(target => positionNameMatches(contextPage, tab, target.name)))
+      if (matching.length !== 1 || !verifyPositionEvidence(contextPage, { jobId: this.context.job.jobId, jobName: this.context.job.jobName, platformJobs: this.context.job.platformJobs?.liepin }, { ref: matching[0].ref }).ok) {
+        throw new SourcingHandoff('filter_position_context_unverified')
+      }
     } else if (this.page().dialogs?.length) throw new SourcingHandoff('recommendation_dialog_requires_interpretation')
     if (!dialog) await this.revealSearchHeader()
     let ready = !!dialog
@@ -175,12 +192,10 @@ export class LiepinSourcingDriver implements SourcingDriver {
       if (ready) break
       const controls = await this.controls()
       try { await this.positionProof(controls); ready = true; break } catch { /* Select one observed target tab below. */ }
-      const choices = controls.filter(control => {
-        if (control.kind !== 'job_option' || !control.active || !this.names.some(name => control.name === name || control.name.startsWith(name + ' '))) return false
-        const id = /rc-tabs-\d+-tab-(\d+)$/.exec(String(this.page().items.find((item: any) => item.ref === control.ref)?.elementId ?? ''))?.[1]
-        return !id || !this.context.job.platformJobs?.liepin?.length || this.context.job.platformJobs.liepin.some(job => job.id === id)
-      })
-      await this.browser.click(requireSingle(choices, 'recommendation_job_choices_ambiguous').ref)
+      const page = this.page(), targets = this.context.job.platformJobs?.liepin?.length ? this.context.job.platformJobs.liepin : [{ id: '', name: this.context.job.jobName || '' }]
+      const options = controls.filter(control => control.kind === 'job_option' && control.active)
+        .map(control => page.items.find((item: any) => item.ref === control.ref))
+      await this.browser.click(requireSingle<any>(positionChoices(page, options, targets), 'recommendation_job_choices_ambiguous').ref)
     }
     if (!ready) throw new SourcingHandoff('recommendation_position_unverified')
     const expected = this.context.job.searchFilters ?? {}
@@ -214,15 +229,23 @@ export class LiepinSourcingDriver implements SourcingDriver {
       }
     }
     const proof = await this.searchProof()
-    this.listDocument = this.page().documentId; this.advanced = undefined
+    this.listDocument = this.page().documentId; this.advanced = undefined; this.stalledAdvances = 0
     return proof
   }
-  async cards(): Promise<SourcingCard[]> {
-    // DOM exposes whole per-card context and dialog ownership, not only AX names.
-    // A viewport-only DOM tree can include the greeting button but omit the
-    // same card's name/ancestors (or vice versa). Resolve ownership from the
-    // whole observed tree. Input visibility is checked separately in open().
-    await this.browser.snapshot('dom', false)
+  async cards(options: { refresh?: boolean } = {}): Promise<SourcingCard[]> {
+    const current = this.page()
+    if (options.refresh === false) {
+      if (this.cardView && this.cardView.page === current) return this.cardView.cards
+      // Known inputs already return a fresh DOM viewport. Resolve its fixed
+      // name/greeting/card structure directly instead of reading it again.
+      if (current.format === 'dom') {
+        const cards = await this.visibleCards(current)
+        if (cards.length || this.hasEnd(current)) { this.cardView = { page: current, cards }; return cards }
+      }
+    }
+    // Infinite lists append below the DOM budget. Always read the current
+    // viewport first, otherwise every scroll can return the same old prefix.
+    await this.browser.snapshot('dom', true)
     // Search submission can precede asynchronous results. Wait only while no
     // result/end component exists, with bounded cancellable observation.
     for (const ms of [200, 400, 800, 1600, 2400]) {
@@ -230,18 +253,27 @@ export class LiepinSourcingDriver implements SourcingDriver {
       if (page.dialogs?.length || page.items.some((i: any) => readable(i) &&
         ([...greetingLabels('liepin'), ...completedGreetingLabels].includes(normalized(i.name)) || /^(?:没有更多|暂无.*(?:人才|简历|结果)|没有符合|已.*最后一页)/.test(normalized(i.name))))) break
       await delay(ms, undefined, { signal: this.context.signal })
-      await this.browser.snapshot('dom', false)
+      await this.browser.snapshot('dom', true)
     }
-    const page = this.page()
+    const cards = await this.visibleCards(this.page())
+    if (cards.length || this.hasEnd(this.page())) { this.cardView = { page: this.page(), cards }; return cards }
+    // Some hosts omit a card's name/parents from viewport trees. The full tree
+    // may supply that ownership, but offscreen name entries are never selected.
+    await this.browser.snapshot('dom', false)
+    const full = await this.visibleCards(this.page())
+    this.cardView = { page: this.page(), cards: full }
+    return full
+  }
+  private hasEnd(page: any) { return page.items.some((i: any) => inViewport(i, page)
+    && /^(?:没有更多|暂无.*(?:人才|简历|结果)|没有符合|已.*最后一页)/.test(normalized(i.name))) }
+  private async visibleCards(page: any): Promise<SourcingCard[]> {
     if (page.dialogs?.length) throw new SourcingHandoff('list_has_dialog')
     if (this.listDocument && page.documentId !== this.listDocument) throw new SourcingHandoff('list_document_changed')
     const result: SourcingCard[] = []
     const labels = new Set([...greetingLabels('liepin'), ...completedGreetingLabels])
-    for (const item of page.items.filter((i: any) => readable(i) && labels.has(normalized(i.name)))) {
+    for (const item of page.items.filter((i: any) => inViewport(i, page) && labels.has(normalized(i.name)))) {
       const text = normalized(item.context?.text), name = nameOf(text)
       if (!name || text.length < 40 || [...text.matchAll(/\d{2}\s*岁/g)].length !== 1) continue
-      const sourceId = hash({ name, text })
-      if (result.some(r => r.sourceId === sourceId)) continue
       // Only a name inside the exact same single-person context can be opened.
       const parentHas = (child: any, ancestor: any) => {
         const seen = new Set<string>()
@@ -266,12 +298,19 @@ export class LiepinSourcingDriver implements SourcingDriver {
       const anchors = named.filter((i: any) => !named.some((other: any) => other.ref !== i.ref && parentHas(i, other)))
       if (anchors.length !== 1) continue
       const anchor = anchors[0]
+      if (!inViewport(anchor, page)) continue
       // The read-only identity anchor carries the whole single-person context.
       // The click target is a distinct name node. A masked name alone is not a
       // stable dedupe identity, and a greeting button must never open details.
       const ref = item.ref
       const evidenceRefs = [anchor.ref]
       assertCandidateQuote(page, { ref, name, evidenceRefs })
+      // Activity/contact hints can change after a scroll. Resolve the exact
+      // observed card ID before using text as the legacy fallback identity.
+      await this.context.broker.inspectRefs(page, [ref], this.context.signal, true, true)
+      const identity = liepinCandidateIdentity(page, [ref], this.context.broker)
+      const sourceId = identity ? platformIdentityKey('liepin', identity) : hash({ name, text })
+      if (result.some(r => r.sourceId === sourceId)) continue
       result.push({ sourceId, name, text, ref, openRef: anchor.ref, evidenceRefs })
       if (result.length >= 30) break
     }
@@ -284,19 +323,34 @@ export class LiepinSourcingDriver implements SourcingDriver {
     const anchor = page.items.find((i: any) => i.ref === card.openRef)
     const y = Number(anchor?.bounds?.y), height = Number(page.viewport?.height)
     if (Number.isFinite(y) && height > 0 && (y < 0 || y >= height)) {
-      await this.browser.execute('browser_scroll', { tabId: page.tabId, deltaY: Math.round(y - height / 3), purpose: 'navigation' })
+      const labels = new Set([...greetingLabels('liepin'), ...completedGreetingLabels])
+      const scrollAnchor = page.items.find((item: any) => readable(item) && labels.has(normalized(item.name))
+        && nameOf(normalized(item.context?.text)) && Number.isFinite(item.bounds?.y) && item.bounds.y >= 0
+        && item.bounds.height > 0 && item.bounds.width > 0 && item.bounds.y + item.bounds.height <= height)
+      if (!scrollAnchor) throw new SourcingHandoff('candidate_scroll_anchor_unverified')
+      await this.browser.execute('browser_scroll', { ...this.browser.locator(scrollAnchor.ref), deltaY: Math.round(y - height / 3), purpose: 'navigation' })
       const fresh = requireSingle((await this.cards()).filter(c => c.sourceId === card.sourceId), 'candidate_after_scroll_ambiguous')
       await this.browser.click(fresh.openRef)
     } else await this.browser.click(card.openRef)
     return this.resume(card.name)
   }
   async resume(name: string): Promise<ResumeLocator> {
-    await this.browser.snapshot('dom')
-    const page = this.page()
-    const dialog = requireSingle((page.dialogs ?? []).filter((d: any) => normalized(d.text).includes(normalized(name)) && /工作经历|项目经历|项目经验/.test(d.text)), 'candidate_detail_unknown') as any
-    const root = page.items.find((i: any) => i.ref === dialog.ref && readable(i))
-    if (!root || !normalized(root.name).includes(normalized(name))) throw new SourcingHandoff('detail_identity_unverified')
-    return { tabId: page.tabId, snapshotId: page.snapshotId, identityRef: root.ref, resumeRefs: [root.ref] }
+    // The click receipt may still contain the list or a loading shell. Read
+    // the whole foreground container and wait for actual experience content.
+    for (const ms of [0, 200, 400, 800, 1600, 2400]) {
+      if (ms) await delay(ms, undefined, { signal: this.context.signal })
+      await this.browser.snapshot('dom', false)
+      const page = this.page()
+      const dialogs = (page.dialogs ?? []).filter((d: any) => normalized(d.text).includes(normalized(name)) && /工作经历|项目经历|项目经验/.test(d.text))
+      if (!dialogs.length) continue
+      const dialog = requireSingle<any>(dialogs, 'candidate_detail_ambiguous')
+      const root = page.items.find((i: any) => i.ref === dialog.ref && readable(i))
+      // A long resume can put the name beyond the truncated DOM node name;
+      // identity is established by this same dialog's authoritative full text.
+      if (!root) throw new SourcingHandoff('detail_identity_unverified')
+      return { tabId: page.tabId, snapshotId: page.snapshotId, identityRef: root.ref, resumeRefs: [root.ref] }
+    }
+    throw new SourcingHandoff('candidate_detail_unknown')
   }
   async returnToList() {
     const page = this.page()
@@ -311,8 +365,16 @@ export class LiepinSourcingDriver implements SourcingDriver {
         && (page.dialogs ?? []).some((dialog: any) => dialog.ref === i.dialogRef && /工作经历|项目经历|项目经验/.test(dialog.text))
     })
     await this.browser.click(requireSingle<any>(targets, 'resume_close_ambiguous').ref)
-    if (this.page().dialogs?.length) throw new SourcingHandoff('resume_close_unconfirmed')
-    return this.confirmReturnedList()
+    // The click receipt can precede the drawer's exit animation or carry the
+    // covered list. Confirm with fresh read-only views; never click close again.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await this.browser.snapshot('dom', true)
+      const dialogs = this.page().dialogs ?? []
+      if (!dialogs.length) return this.confirmReturnedList()
+      if (dialogs.some((dialog: any) => !/工作经历|项目经历|项目经验/.test(dialog.text))) break
+      if (attempt < 4) await delay(40 * 2 ** attempt, undefined, { signal: this.context.signal })
+    }
+    throw new SourcingHandoff('resume_close_unconfirmed')
   }
   private async confirmReturnedList() {
     if (!this.listDocument) return
@@ -320,28 +382,46 @@ export class LiepinSourcingDriver implements SourcingDriver {
     // Rebind only after independently re-reading position and active filters;
     // the session must also confirm this proof before reading the next card.
     await this.revealSearchHeader()
-    const proof = await this.searchProof()
+    let proof: SearchConfirmation
+    try { proof = await this.searchProof() }
+    catch (error) {
+      // A viewport DOM may omit the filter row's text ancestry. One semantic
+      // observation can supply it; the same constraints still must pass.
+      if (!/SEARCH_CONDITIONS_UNVERIFIED/.test(String(error))) throw error
+      await this.browser.snapshot('semantic')
+      proof = await this.searchProof()
+    }
     this.listDocument = this.page().documentId
     return proof
   }
   async advance() {
+    const cards = await this.cards({ refresh: false })
     const page = this.page()
-    const ends = page.items.filter((i: any) => readable(i) && /^(?:没有更多|暂无.*(?:人才|简历|结果)|没有符合|已.*最后一页)/.test(normalized(i.name)))
+    const ends = page.items.filter((i: any) => inViewport(i, page) && /^(?:没有更多|暂无.*(?:人才|简历|结果)|没有符合|已.*最后一页)/.test(normalized(i.name)))
     if (ends.length === 1) return { exhaustion: { tabId: page.tabId, snapshotId: page.snapshotId, ref: ends[0].ref, quote: normalized(ends[0].name).slice(0, 300) } }
-    const signature = hash({ scroll: [page.viewport?.scrollX, page.viewport?.scrollY], items: page.items.filter((i: any) => readable(i)).map((i: any) => [i.role, i.name, i.context?.text]) })
-    if (signature === this.advanced) throw new SourcingHandoff('list_no_progress')
+    // Timers, online hints, item counts and document scroll coordinates cannot
+    // prove that the candidate list advanced. Only the visible identities do.
+    const signature = hash(cards.map(card => card.sourceId).sort())
+    this.stalledAdvances = signature === this.advanced ? this.stalledAdvances + 1 : 0
+    if (this.stalledAdvances >= 2) throw new SourcingHandoff('list_no_progress')
     this.advanced = signature
-    const next = page.items.filter((i: any) => readable(i) && normalized(i.name) === '下一页' && !statesOf(i).includes('disabled'))
+    const next = page.items.filter((i: any) => inViewport(i, page) && normalized(i.name) === '下一页' && !statesOf(i).includes('disabled'))
     if (next.length === 1) await this.browser.click(next[0].ref)
-    else await this.browser.execute('browser_scroll', { tabId: page.tabId,
-      deltaY: Math.min(500, Math.max(120, Math.floor(Number(page.viewport?.height ?? 600) * 0.5))), purpose: 'navigation' })
+    else {
+      const labels = new Set([...greetingLabels('liepin'), ...completedGreetingLabels])
+      const anchor = page.items.find((item: any) => inViewport(item, page) && labels.has(normalized(item.name)) && nameOf(normalized(item.context?.text)))
+      if (!anchor) throw new SourcingHandoff('candidate_scroll_anchor_unverified')
+      await this.browser.execute('browser_scroll', { ...this.browser.locator(anchor.ref),
+        deltaY: Math.min(500, Math.max(120, Math.floor(Number(page.viewport?.height ?? 600) * 0.5))), purpose: 'navigation' })
+    }
     return {}
   }
   async greeting(name: string, candidateKey: string) {
     const detail = this.page()
     if (detail.dialogs?.length === 1) {
       const dialog = detail.dialogs[0]
-      const targets = detail.items.filter((item: any) => readable(item) && item.dialogRef === dialog.ref && greetingLabels('liepin').has(normalized(item.name)))
+      const targets = detail.items.filter((item: any) => readable(item) && greetingLabels('liepin').has(normalized(item.name))
+        && belongsToResumeDialog(detail, item.ref, dialog.ref))
       const position = this.evidence.position(detail, { jobId: this.context.job.jobId, jobName: this.context.job.jobName, platformJobs: this.context.job.platformJobs?.liepin }, { ref: dialog.ref })
       if (targets.length === 1 && position?.ok && normalized(dialog.text).includes(normalized(name))) {
         return { tabId: detail.tabId, snapshotId: detail.snapshotId, candidateKey, ref: targets[0].ref, identityRef: dialog.ref, evidenceRefs: [], position: { ref: dialog.ref } }

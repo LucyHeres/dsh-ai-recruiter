@@ -11,7 +11,7 @@ export const liepinPlatform: RecruitmentPlatform = {
   sourcingSearchEntry: liepinDefinition.sourcingSearchEntry,
   sourcingHints: LIEPIN_RECOMMENDATION_ROUTE,
   sourcingSearchHints: LIEPIN_POSITION_ROUTE,
-  observationFormat: 'semantic',
+  observationFormat: 'dom',
   createSearchEvidence: broker => new LiepinSearchEvidence(broker),
   createPositionRoute: (names, mode) => new LiepinPositionRoute(names, mode === 'recommend' ? LIEPIN_RECOMMENDATION_ROUTE : LIEPIN_POSITION_ROUTE),
   createSourcingDriver: context => new LiepinSourcingDriver(context),

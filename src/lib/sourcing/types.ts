@@ -2,6 +2,7 @@ import type { AgentBrowserTools } from '../agent-browser-tools.js'
 import type { BrowserAgentRunner } from '../host-browser-agent.js'
 import type { BrowserAgentTool } from '../browser-agent.js'
 import type { SourcingJob } from '../../shared/sourcing.js'
+import type { PlatformCandidateIdentity } from '../../shared/workbench.js'
 import type { z } from 'zod'
 import type { sourcingSearchConfirmationSpec } from '../sourcing-search.js'
 import type { sourcingGreetingSpec } from '../sourcing-greeting.js'
@@ -15,7 +16,7 @@ export type SourcingDriverContext = { broker: AgentBrowserTools; job: SourcingJo
 export interface SourcingDriver {
   recognizes(): Promise<boolean>
   prepareSearch(): Promise<SearchConfirmation>
-  cards(): Promise<SourcingCard[]>
+  cards(options?: { refresh?: boolean }): Promise<SourcingCard[]>
   open(card: SourcingCard): Promise<ResumeLocator>
   resume(name: string): Promise<ResumeLocator>
   returnToList(): Promise<SearchConfirmation | void>
@@ -28,6 +29,8 @@ export type SourcingOperations = {
   preview(card: SourcingCard, signal: AbortSignal): Promise<{ text: string; duplicate: boolean }>
   complete(): boolean
   remaining(): number
-  state(): { searchReady: boolean; pending?: string; needsGreeting: boolean; candidateKey?: string }
+  progress?(message: string): Promise<void>
+  state(): { searchReady: boolean; pending?: string; needsGreeting: boolean; candidateKey?: string;
+    selectedCandidate?: { candidateKey: string; name: string; platformIdentity?: PlatformCandidateIdentity; verifiedListText?: string; resumeCharacters: number; stage: 'selected' | 'reading' | 'greeting' } }
   captured(): { name: string; text: string; scope: 'summary' | 'online' } | undefined
 }

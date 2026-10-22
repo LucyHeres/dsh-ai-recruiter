@@ -24,7 +24,7 @@ function model(turns) {
   } }
 }
 const observation = id => ({ page: { snapshotId: id, items: [{ ref: 'menu', role: 'button', name: '职位菜单' }] }, processed: [], recentActions: [] })
-const results = request => request.messages.flatMap(m => m.content.filter(b => b.type === 'tool-result'))
+const results = request => request.messages.filter(message => message.role === 'tool')
 
 test('native planner inspects DOM then selects an action; subsequent decisions retain real call/result history', async () => {
   const llm = model([[call('inspect-1', 'inspect_element', { ref: 'menu' })], [call('hover-1', 'page_hover', { ref: 'menu', reason: '检查发现关联菜单，先悬停' })], [call('done-1', 'page_finish', { reason: '任务完成' })]])

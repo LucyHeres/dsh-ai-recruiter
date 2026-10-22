@@ -8,7 +8,7 @@ export interface TaskFeature {
   unit: string
 }
 export const TASK_FEATURES: readonly TaskFeature[] = [
-  { kind: 'greeting', label: '打招呼', description: '按设定条件主动沟通人才', available: true, progressLabel: '已点击沟通', unit: '人' },
+  { kind: 'greeting', label: '打招呼', description: '按设定条件主动沟通人才', available: true, progressLabel: '已打招呼', unit: '人' },
   { kind: 'resume_import', label: '简历入库', description: '批量采集已收简历并上传薪人薪事', available: true, progressLabel: '已成功入库', unit: '份' },
   { kind: 'talent_sourcing', label: '人才寻聘', description: '按职位要求搜索人才、阅读简历并分析匹配度', available: true, progressLabel: '已评估候选人', unit: '人' },
 ]
@@ -70,6 +70,7 @@ export interface WorkbenchJob {
   jobName?: string
   jobId?: string
   destinationLabel?: string
+  resumeSource?: 'platform_received'
   limit: number
   phase?: string
   nextActionAt?: string

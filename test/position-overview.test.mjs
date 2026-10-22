@@ -19,10 +19,10 @@ test('queued sourcing greetings do not consume daily quota or fabricate a contac
  const linkedCandidate={...candidate,profileUrl:'https://lpt.liepin.com/profile/one'}
  const linkedPending={...pending,greetings:pending.greetings.map(row=>({...row,key:hash(['liepin',linkedCandidate.profileUrl]),identityKind:'url'}))}
  assert.equal(candidateCommunication(linkedCandidate,communicationIndex([linkedPending])),'none')
- assert.equal(dailyUsage([pending]).liepin,0);assert.equal(candidateCommunication(candidate,communicationIndex([pending])),'unknown')
+ assert.equal(dailyUsage([pending]).liepin,0);assert.equal(candidateCommunication(candidate,communicationIndex([pending])),'none')
  const clicked={...source,greetings:[greeting,{...greeting,key:'boss',candidateKey:'boss',platform:'boss'}]}
  assert.deepEqual(dailyUsage([clicked]),{liepin:1,boss:1})
  assert.equal(candidateCommunication(candidate,communicationIndex([clicked])),'recorded')
  const uncertain={...source,greetings:[{...greeting,stage:'unknown',clickedAt:undefined}]}
- assert.equal(candidateCommunication(candidate,communicationIndex([uncertain])),'uncertain')
+ assert.equal(candidateCommunication(candidate,communicationIndex([uncertain])),'none')
 })

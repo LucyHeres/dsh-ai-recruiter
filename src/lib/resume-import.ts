@@ -11,6 +11,8 @@ import type { BrowserAgentRunner } from './host-browser-agent.js'
 import { safeError } from './task-error.js'
 import { resumeDiagnosis } from './resume-diagnosis.js'
 import { logError, logKey, type DeveloperLog } from './developer-log.js'
+import { selectReceivedResumes } from './received-resume-store.js'
+import { uploadReceivedFiles } from './received-resume-upload.js'
 import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, RESUME_DEFAULTS, RESUME_LIBRARIES, RESUME_LIBRARY_STATUSES, DELIVERY_TYPE_OPTIONS, type WorkbenchJob, type ResumeOptions } from '../shared/workbench.js'
 import type { WorkbenchTaskExecutor } from './task-executor.js'
 
@@ -48,7 +50,12 @@ type ImportJob = WorkbenchJob & {
   delivery: string
   recommenderId?: string
   headhunterSupplierId?: string
+  roundId?: string
+  attachmentIds?: string[]
 }
+export const receivedResumeStartSpec = z.object({ id: z.string().uuid(), jobId: z.string().min(1).max(64),
+  roundId: z.union([z.literal('all'), z.string().uuid()]), attachmentIds: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(500),
+  resumeSource: z.literal('platform_received'), confirmed: z.literal(true) }).strict()
 const listUrls = { liepin: 'https://lpt.liepin.com/resume/apply', boss: 'https://www.zhipin.com/web/chat/index' }
 const now = () => new Date().toISOString()
 
@@ -58,6 +65,11 @@ export class ResumeImport implements WorkbenchTaskExecutor {
   constructor(private browser: BrowserClient, private store: Store, private xinOf: () => XinClient | null,
     private engineOf: (signal?: AbortSignal) => RecruitEngine, private readonly agentOf: () => BrowserAgentRunner, private readonly logger?: DeveloperLog) {}
   create(request: unknown): ImportJob {
+    if ((request as any)?.resumeSource === 'platform_received') {
+      const input = receivedResumeStartSpec.parse(request)
+      return { ...input, platform: 'liepin', destination: '1:10', channel: '', delivery: '1', kind: this.kind, status: 'queued',
+        limit: new Set(input.attachmentIds).size, results: [], events: [], detail: '正在准备上传人才列表的附件简历', createdAt: now(), updatedAt: now() }
+    }
     const input = resumeStartSpec.parse(request)
     return { ...input, kind: this.kind, status: 'queued', results: [], events: [], detail: '正在准备简历入库', createdAt: now(), updatedAt: now() }
   }
@@ -115,6 +127,7 @@ export class ResumeImport implements WorkbenchTaskExecutor {
   }
   async run(base: WorkbenchJob, signal: AbortSignal) {
     const job = base as ImportJob
+    if (job.resumeSource === 'platform_received') return this.runReceived(job, signal)
     await this.store.locked('workbench-browser', async () => {
       let owned = false
       let ownedSession: { workflowTaskId?: string; taskId?: string } | undefined
@@ -203,6 +216,29 @@ export class ResumeImport implements WorkbenchTaskExecutor {
           this.logger?.write('warn', 'browser.release_failed', logError(error))
           await this.progress(job, 'finished', `${job.detail}；浏览器执行权释放未确认`)
         }
+      }
+    })
+  }
+  private async runReceived(job: ImportJob, signal: AbortSignal) {
+    await this.store.locked('workbench-browser', async () => {
+      try {
+        await this.progress(job, 'preparing', '正在核对当前职位的附件和入库权限')
+        const records = await selectReceivedResumes(this.store, job.jobId, job.roundId!, job.attachmentIds!)
+        const options = await this.options(signal)
+        job.jobName = options.jobs.find(row => row.id === job.jobId)?.label
+        job.destinationLabel = '新简历 · 未处理'; job.status = 'running'
+        const outcome = await uploadReceivedFiles({ store: this.store, engine: this.engineOf(signal), jobId: job.jobId, records, options, signal,
+          onResult: async (result, index) => {
+            job.results[index] = result
+            await this.progress(job, 'importing', `${index + 1}/${records.length}：${result.name} · ${result.detail}`)
+          } })
+        const saved = job.results.filter(r => r.stage === 'succeeded').length, skipped = job.results.filter(r => r.stage === 'skipped').length, failed = job.results.filter(r => r.stage === 'failed').length
+        job.status = outcome.stopped ? 'unknown' : failed ? 'failed' : 'completed'
+        await this.progress(job, 'finished', `附件上传结束：成功 ${saved} 份，已上传跳过 ${skipped} 份，失败 ${failed} 份${outcome.stopped ? '；已停止，请先核对薪人薪事记录' : ''}`)
+      } catch (error) {
+        for (const result of job.results) if (result.stage === 'sending') { result.stage = 'unknown'; result.detail = '上传已中断，请先核对薪人薪事记录' }
+        job.status = job.results.some(r => r.stage === 'unknown') ? 'unknown' : signal.aborted ? 'stopped' : 'failed'
+        await this.progress(job, 'finished', signal.aborted ? '附件上传已停止' : safeError(error))
       }
     })
   }

@@ -4,16 +4,17 @@ import type { McpToolInfo } from './browser-client.js'
 import type { DeveloperLog } from './developer-log.js'
 import { Store } from './store.js'
 import { safeError } from './task-error.js'
-import { sourcingSource, sourcingStartSpec, sourcingVersion, validateCriteria } from './sourcing-policy.js'
+import { sourcingSource, sourcingStartSpec, sourcingVersion, validateCriteria, validateSupplementCoverage } from './sourcing-policy.js'
 import { PLATFORMS, type Platform, type WorkbenchJob } from '../shared/workbench.js'
 import type { SourcingJob, SourcingPosition, SourcingRequirements } from '../shared/sourcing.js'
-import { sourcingTotalTarget } from '../shared/sourcing-score.js'
+import { sourcingTotalTarget, sourcingQualifiedCount } from '../shared/sourcing-score.js'
 import { deriveSourcingSearchFilters } from './sourcing-search.js'
 import { sourcingChannelReason } from '../shared/sourcing-status.js'
 import { sourcingPlatformsForChannels } from '../shared/published-channels.js'
 import { createSourcingSession } from './sourcing/session.js'
 import { sourcingEntry, sourcingMode } from './sourcing/source.js'
 import { recruitmentPlatform } from './platforms/registry.js'
+import { validateListCriteria } from './sourcing/list-screening.js'
 
 const now = () => new Date().toISOString()
 
@@ -43,7 +44,10 @@ export class SourcingAgent {
     for (const platform of job.platforms) job.platformJobs[platform] = await this.options.loadPlatformJobs?.(job.jobId, platform, signal) ?? []
     job.requirementVersion = sourcingVersion(job.position, job.supplement)
     const prior = await this.store.find<SourcingRequirements>(`criteria-${job.requirementVersion}`)
-    if (prior) { validateCriteria(prior.criteria, sourcingSource(job.position, job.supplement)); job.requirements = prior }
+    if (prior?.listCriteria && prior.rubricVersion === 2) {
+      const source = sourcingSource(job.position, job.supplement)
+      validateCriteria(prior.criteria, source); validateListCriteria(prior.listCriteria, source); validateSupplementCoverage(prior, job.supplement); job.requirements = prior
+    }
   }
   private async save(job: SourcingJob) {
     job.updatedAt = now()
@@ -64,17 +68,19 @@ export class SourcingAgent {
       try {
         const agent = this.agentOf()
         const history = (await this.store.list<SourcingJob>(this.storagePrefix)).filter(row => row.kind === this.kind && row.jobId === job.jobId && row.requirementVersion === job.requirementVersion && row.id !== job.id)
-        const previous = new Set(history.flatMap(row => row.candidates ?? []).map(row => row.key))
+        // Old list-only results still need their first real detail capture.
+        // Greeting history is reconciled separately before any dispatch.
+        const previous = new Set(history.flatMap(row => row.candidates ?? []).filter(row => row.scope !== 'summary').map(row => row.key))
         await this.begin(signal); owned = true; job.status = 'running'
         for (const channel of job.channels) {
           signal.throwIfAborted()
-          if (job.candidates.length >= totalTarget) break
+          if (sourcingQualifiedCount(job) >= totalTarget) break
           channel.status = 'running'
           this.logger?.updateContext({ platform: channel.platform })
           await this.progress(job, 'searching', `正在${PLATFORMS[channel.platform].label}${sourcingMode(job) === 'recommend' ? '人才推荐中按职位要求寻聘' : '按职位要求搜索人才'}`)
-          const quota = job.limitScope === 'per_platform' ? job.limit : Math.ceil((job.limit - job.candidates.length) / job.channels.filter(row => row.status === 'queued' || row === channel).length)
+          const quota = job.limitScope === 'per_platform' ? job.limit : Math.ceil((job.limit - sourcingQualifiedCount(job)) / job.channels.filter(row => row.status === 'queued' || row === channel).length)
           channel.limit = quota
-          const before = job.candidates.length
+          const before = sourcingQualifiedCount(job)
           const session = await createSourcingSession({ job, channel, quota, before, previous, signal, agent,
             store: this.store, call: this.call, listTools: this.listTools, logger: this.logger, greetingPolicy: this.options.greetingPolicy,
             save: job => this.save(job), progress: (job, phase, message) => this.progress(job, phase, message) })
@@ -85,7 +91,7 @@ export class SourcingAgent {
             if (channel.status === 'running') {
               const reached = session.complete()
               channel.status = reached ? 'completed' : 'stopped'
-              channel.detail = reached ? `本渠道已评估 ${job.candidates.length - before} 人` : `${safeError(result.message)}；${session.failureDetail()}`
+              channel.detail = reached ? `本渠道已评估 ${sourcingQualifiedCount(job) - before} 人` : `${safeError(result.message)}；${session.failureDetail()}`
             }
           } catch (error) {
             if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN/.test(String(error))) {

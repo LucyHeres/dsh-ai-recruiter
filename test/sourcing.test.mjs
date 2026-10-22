@@ -12,10 +12,15 @@ import { readSourcingPosition, plainJobText } from '../dist/lib/sourcing-positio
 import { Workbench } from '../dist/lib/workbench.js'
 import { sourcingCriterionScore } from '../dist/shared/sourcing-score.js'
 import { DeveloperLog } from '../dist/lib/developer-log.js'
+import { recruitmentPlatform } from '../dist/lib/platforms/registry.js'
+import { recruitmentMatchingSkill } from '../dist/lib/browser-skill.js'
 
 const position = { id: 'job-1', name: 'Java 后端工程师', platforms: ['liepin', 'boss'], description: 'Java 后端开发，支付经验优先', city: '上海', department: '研发', fetchedAt: new Date().toISOString() }
 const criteria = [{ id: 'java', label: 'Java 后端开发', quote: 'Java 后端开发', must: true, weight: 60 }, { id: 'pay', label: '支付经验', quote: '支付经验优先', must: false, weight: 40 }]
 const assessments = [{ criterionId: 'java', state: 'match', quote: 'Java 后端开发', reason: '有明确项目职责' }, { criterionId: 'pay', state: 'unknown', quote: '', reason: '未提及支付项目' }]
+// New task definitions separate the preferred payment experience from core ability.
+const modelCriteria = [{ ...criteria[0], tier: 'core', must: false, weight: 100 }, { ...criteria[1], tier: 'bonus', weight: 10 }]
+const defineCriteria = rows => rows === criteria ? modelCriteria : rows.map(row => ({ ...row, tier: row.tier ?? 'core', must: row.tier === 'must' }))
 test('criterion contributions preserve half-points and round only the final total', () => {
   const criteria = [60, 15, 15, 10].map((weight, i) => ({ id: String(i), weight, must: false }))
   const assessments = ['match', 'partial', 'mismatch', 'unknown'].map((state, i) => ({ criterionId: String(i), state, quote: state === 'unknown' ? '' : 'Java' }))
@@ -48,14 +53,15 @@ test('position import preserves job identity and rich-text safety and imports ex
   assert.doesNotMatch(encoded.description, /<\/?(?:p|li|ul|strong)>/)
   assert.equal(plainJobText('&lt;script&gt;alert(1)&lt;/script&gt;&lt;p&gt;Java&lt;/p&gt;'), 'Java')
 })
-test('sourcing rejects platform writes, messages, unrelated inputs and opaque buttons in code', () => {
-  const page = { snapshotId: 's', items: [{ ref: 'send', role: 'button', name: '立即沟通' }, { ref: 'opaque', role: 'button', name: 'opaque action' }, { ref: 'chat', role: 'textbox', name: '输入消息' }, { ref: 'query', role: 'searchbox', name: '搜索人才' }] }
+test('sourcing permits readable custom navigation but rejects business writes, unsafe inputs and blank targets', () => {
+  const page = { snapshotId: 's', items: [{ ref: 'send', role: 'button', name: '立即沟通' }, { ref: 'custom', role: 'button', name: '展开更多经历' }, { ref: 'blank', role: 'button', name: '' }, { ref: 'chat', role: 'textbox', name: '输入消息' }, { ref: 'query', role: 'searchbox', name: '搜索人才' }] }
   const call = (name, ref, purpose = 'navigation') => ({ name, args: { ref }, readOnly: false, purpose })
   assert.throws(() => assertSourcingNavigation(call('browser_click', 'send'), page), /READ_ONLY/)
   assert.throws(() => assertSourcingNavigation(call('browser_click', 'send'), page, '立即沟通'), /READ_ONLY/)
   assert.throws(() => assertSourcingNavigation(call('browser_click', 'query', 'business_write'), page), /READ_ONLY/)
   assert.throws(() => assertSourcingNavigation(call('browser_type', 'chat'), page), /SEARCH_INPUT/)
-  assert.throws(() => assertSourcingNavigation(call('browser_click', 'opaque'), page), /UNVERIFIED/)
+  assert.doesNotThrow(() => assertSourcingNavigation(call('browser_click', 'custom'), page))
+  assert.throws(() => assertSourcingNavigation(call('browser_click', 'blank'), page), /UNVERIFIED/)
   assert.doesNotThrow(() => assertSourcingNavigation(call('browser_type', 'query'), page))
 })
 
@@ -63,10 +69,15 @@ const props = { tabId: { type: 'integer' }, snapshotId: { type: 'string' }, ref:
 const info = (name, readOnly, properties, required = []) => ({ name, inputSchema: { type: 'object', properties, required, additionalProperties: false }, annotations: { readOnlyHint: readOnly }, _meta: { browserAgent: { available: true, capability: name.replace('_', '.') } } })
 const infos = [info('browser_list_tabs', true, {}), info('browser_snapshot', true, { tabId: props.tabId, format: { type: 'string' } }, ['tabId']), info('browser_type', false, { ...props, text: { type: 'string' }, clear: { type: 'boolean' } }, ['tabId', 'snapshotId', 'ref', 'text']), info('browser_click', false, props, ['tabId', 'snapshotId', 'ref']), info('browser_press_key', false, { tabId: props.tabId, key: { type: 'string' } }, ['tabId', 'key'])]
 async function fixture(action, options = {}) {
+  // This fixture tests generic navigation/business policy decisions. Dedicated
+  // hybrid-session fixtures exercise the real per-platform fixed routes.
+  const adapters = ['liepin', 'boss'].map(name => ({ adapter: recruitmentPlatform(name), factory: recruitmentPlatform(name).createSourcingDriver }))
+  for (const { adapter } of adapters) adapter.createSourcingDriver = () => ({ recognizes: async () => false })
   const dir = await mkdtemp(join(tmpdir(), 'sourcing-')); const store = new Store(dir, 'company'); await store.init()
   const sourceMode = options.sourceMode ?? (options.platforms?.includes('boss') ? 'recommend' : 'search')
-  let snapshots = 0, keyword = options.initialKeyword ?? '', currentOrigin = '', released = 0
+  let snapshots = 0, keyword = options.initialKeyword ?? '', currentOrigin = '', released = 0, detail = false
   let body = '陈先生 Java 后端开发 工作经历：负责订单服务和数据库优化。'
+  const fullText = () => body + '\n项目经历：参与Java订单系统的设计与开发，负责接口实现、数据库优化、上线与维护。'
   const page = () => ({ tabId: 1, snapshotId: `s${snapshots}`, documentId: 'doc', format: 'dom', url: currentOrigin + (options.pagePath || (sourceMode === 'search' ? '/search' : currentOrigin.includes('zhipin') ? '/web/chat/recommend' : '/recommend')), items: [
     { ref: 'query', role: 'searchbox', name: '搜索人才', value: keyword }, { ref: 'search', role: 'button', name: '搜索' },
     { ref: 'city', role: 'combobox', name: '期望城市', value: '上海' },
@@ -77,20 +88,27 @@ async function fixture(action, options = {}) {
     { ref: 'position', role: 'tab', name: options.wrongPosition ? '产品经理' : position.name, states: ['selected'] },
     { ref: 'detail', role: 'button', name: '查看简历', context: {text:body} },
     { ref: 'avatar', role: 'img', tagName: 'span', name: '头像', states: ['occluded'], context: {text:body}, ancestorControls: [{tagName:'div',role:'generic',name:'不应记录的候选人文案'}] },
+    { ref: 'delete', role: 'button', name: '删除', context: {text:body} },
+    { ref: 'close-detail', role: 'button', name: '关闭' },
     { ref: 'foreignProfile', role: 'link', name: '李先生', href: currentOrigin+'/profile/other', context:{text:'李先生 支付项目负责人'} },
-  ] })
+  ].map(item => detail && ['card', 'resume', 'detail', 'avatar', 'delete', 'close-detail', ...(options.wrongIdentity ? [] : ['send'])].includes(item.ref) ? { ...item, dialogRef: 'detail-dialog' } : item)
+    .concat(detail ? [{ ref: 'detail-dialog', role: 'dialog', name: '简历详情' }] : []),
+    dialogs: detail ? [{ ref: 'detail-dialog', text: fullText(), closeRef: 'close-detail' }] : [],
+  })
   const calls = []
   const call = async (name, args) => {
     calls.push(name)
     if (name === 'browser_finish') { released++; return {} }
     currentOrigin = args.policy.allowedOrigins[0]
-    if (name === 'browser_list_tabs') return { tabs: [{ tabId: 1, url: currentOrigin + (options.pagePath || (sourceMode === 'search' ? '/search' : currentOrigin.includes('zhipin') ? '/web/chat/recommend' : '/recommend')) }] }
+    if (name === 'browser_list_tabs') { detail = false; return { tabs: [{ tabId: 1, url: currentOrigin + (options.pagePath || (sourceMode === 'search' ? '/search' : currentOrigin.includes('zhipin') ? '/web/chat/recommend' : '/recommend')) }] } }
     if (name === 'browser_snapshot') { snapshots++; return options.transformPage ? options.transformPage(page()) : page() }
     if (name === 'browser_inspect_element') {
       const id = typeof options.resumeId === 'function' ? options.resumeId() : options.resumeId
       return { element: { attributes: { class: id ? 'xpath-resume-item-wrap xpath-resume-item-wrap-' + id : '' } }, ancestors: [] }
     }
     if (name === 'browser_click' && args.ref === 'send') { calls.push('greeting_click'); if (options.clickError) throw new Error(options.clickError) }
+    if (name === 'browser_click' && args.ref === 'detail') detail = true
+    if (name === 'browser_click' && args.ref === 'close-detail') detail = false
     if (name === 'browser_click') options.onClick?.(args.ref)
     if (name === 'browser_type') keyword = options.appendByDefault && args.clear !== true ? keyword + args.text : args.text
     if (name === 'browser_type' || name === 'browser_click' || name === 'browser_press_key') { snapshots++; return { dispatched: true, snapshot: page() } }
@@ -100,10 +118,11 @@ async function fixture(action, options = {}) {
   // Navigation tests prescribe decisions for the separate assessment model.
   // Quotes in test plans are mapped to source IDs here; the navigation API
   // itself accepts locators only, just like the production recovery agent.
-  let evaluationPlan
+  const listCriteria = options.listCriteria ?? [{ field: 'city', requirement: '上海', quote: '上海' }]
+  let evaluationPlan, listEvaluationPlan
   const runner = async opts => {
     if (opts.tools.length === 1 && opts.tools[0].name === 'sourcing_define_requirements') {
-      await opts.tools[0].execute({ keyword: 'Java', criteria }, opts.signal)
+      await opts.tools[0].execute({ keyword: 'Java', criteria: options.criteria ?? modelCriteria, listCriteria, supplementCoverage: options.supplementCoverage ?? [] }, opts.signal)
       return { status: 'completed', message: 'defined', turns: 1, modelMs: 0, toolMs: 0 }
     }
     if (opts.tools[0]?.name === 'sourcing_submit_assessments') {
@@ -111,30 +130,39 @@ async function fixture(action, options = {}) {
       await opts.tools[0].execute({ candidates: opts.goal.candidates.map(source => ({ sourceId: source.sourceId,
         ...(opts.goal.mode === 'detail' ? { fields: planned.fields ?? [] } : {}),
         ...(opts.goal.candidateFilters ? { filterAssessments: Object.keys(opts.goal.candidateFilters).map(field => ({ field, state: options.filterState ?? 'match', evidenceId: options.filterState === 'unknown' ? null : 0, reason: 'Candidate source evidence' })) } : {}),
-        assessments: planned.assessments.map(({ quote, ...row }) => ({ ...row,
+        ...(opts.goal.mode === 'preview' ? { listAssessments: opts.goal.listCriteria.map(criterion => {
+          const planned = listEvaluationPlan?.find(row => row.field === criterion.field)
+          const state = planned?.state ?? options.listState ?? options.filterState ?? 'match'
+          return { field: criterion.field, state, reason: planned?.reason ?? 'Explicit list evidence', evidenceId: state === 'unknown' ? null : planned?.quote ? source.evidence.find(e => normalized(e.text).includes(normalized(planned.quote)))?.id ?? 999 : 0 }
+        }) } : { assessments: planned.assessments.map(({ quote, ...row }) => ({ ...row, ...(opts.goal.rubricVersion === 2 ? { evidenceKind: row.evidenceKind ?? 'direct', confidence: row.confidence ?? (row.state === 'unknown' ? 'low' : 'high') } : {}),
           evidenceId: row.state === 'unknown' ? null : source.evidence.find(e => e.text.includes(quote))?.id ?? 999,
-        })),
+        })) }),
       })) }, opts.signal)
       return { status: 'completed', message: 'assessed', turns: 1, modelMs: 0, toolMs: 0 }
     }
     const execute = (name, args = {}) => {
       const tool = opts.tools.find(row => row.name === name); assert.ok(tool, name)
+      if (name === 'sourcing_define_requirements') return tool.execute({ listCriteria, ...args, criteria: options.criteria ?? defineCriteria(args.criteria ?? criteria), supplementCoverage: options.supplementCoverage ?? [] }, opts.signal)
       if (['sourcing_select_candidate', 'sourcing_record_candidate'].includes(name)) {
         evaluationPlan = { assessments: args.assessments ?? assessments, fields: args.fields ?? [] }
-        const { assessments: ignoredAssessment, fields: ignoredFields, analysis: ignoredAnalysis, ...locator } = args
+        if (name === 'sourcing_select_candidate') listEvaluationPlan = args.listAssessments
+        const { assessments: ignoredAssessment, listAssessments: ignoredListAssessment, fields: ignoredFields, analysis: ignoredAnalysis, ...locator } = args
         return tool.execute(locator, opts.signal)
       }
       return tool.execute(args, opts.signal)
     }
     const identity = () => ({ tabId: 1, snapshotId: `s${snapshots}` })
-    await action({ execute, identity, control, opts, store, body, setBody: value => { body = value } })
+    detail = false
+    const openResume = async () => { if (!detail) await execute('browser_click', { ...identity(), ref: 'detail' }) }
+    const returnToList = async () => { if (detail) await execute('browser_click', { ...identity(), ref: 'close-detail' }) }
+    await action({ execute, identity, control, opts, store, body, openResume, returnToList, setBody: value => { body = value } })
     return options.result ?? { status: 'completed', message: 'done', turns: 1, modelMs: 0, toolMs: 0 }
   }
   const logger = options.logging ? new DeveloperLog(dir, 'info', 'test') : undefined
   const executor = new SourcingAgent(store, call, async () => {}, async () => options.resumeId ? [...infos, info('browser_inspect_element', true, props, ['tabId', 'snapshotId', 'ref'])] : infos, () => runner, async () => options.position ?? position, logger, { loadPlatformJobs: options.loadPlatformJobs })
-  const create = async platforms => { const job = executor.create({ id: randomUUID(), jobId: position.id, platforms, limit: options.limit ?? 1, sourceMode, autoGreet: !!options.autoGreet, ...(options.minimumScore === undefined ? {} : {minimumScore:options.minimumScore}), confirmed: true }); await executor.prepare(job, control.signal); await store.put('sourcing-' + job.id, job); return job }
+  const create = async platforms => { const job = executor.create({ id: randomUUID(), jobId: position.id, platforms, limit: options.limit ?? 1, sourceMode, autoGreet: !!options.autoGreet, supplement: options.supplement ?? '', ...(options.minimumScore === undefined ? {} : {minimumScore:options.minimumScore}), confirmed: true }); await executor.prepare(job, control.signal); await store.put('sourcing-' + job.id, job); return job }
   try { if (options.run) return await options.run({ executor, store, create, control, calls, released: () => released }); return await (async () => { const job = await create(options.platforms ?? ['liepin']); await executor.run(job, control.signal); const log = await logger?.read(); return { job, calls, released, diagnostics: log?.lines.map(line => JSON.parse(line)) } })() }
-  finally { await rm(dir, { recursive: true, force: true }) }
+  finally { for (const { adapter, factory } of adapters) adapter.createSourcingDriver = factory; await rm(dir, { recursive: true, force: true }) }
 }
 async function search({ execute, identity, opts }) {
   await execute('sourcing_define_requirements', { keyword: 'Java', criteria })
@@ -148,8 +176,8 @@ async function search({ execute, identity, opts }) {
 }
 const confirmKeyword = tools => tools.execute('sourcing_confirm_search', { ...tools.identity(), ref: 'query', filters: [{ field: 'city', ref: 'city', quote: '上海' }] })
 const finishExhausted = (tools, reason) => tools.execute('sourcing_finish', { status: 'completed', reason, exhaustion: { ...tools.identity(), ref: 'end', quote: '没有更多结果' } })
-const select = async ({ execute, identity }) => execute('sourcing_select_candidate', { ...identity(), ref: 'card', name: '陈先生', evidenceRefs: [], assessments })
-const record = async ({ execute, identity }, refs = ['resume']) => execute('sourcing_record_candidate', { ...identity(), identityRef: 'resume', resumeRefs: refs, scope: 'online', fields: [{ label: '当前职位', value: 'Java 后端开发' }], assessments, analysis: 'Java职责匹配，支付经历待核实。' })
+const select = async ({ execute, identity, returnToList }) => { await returnToList(); return execute('sourcing_select_candidate', { ...identity(), ref: 'card', name: '陈先生', evidenceRefs: [], assessments }) }
+const record = async ({ execute, identity, openResume }, refs = ['resume']) => { await openResume(); return execute('sourcing_record_candidate', { ...identity(), identityRef: 'resume', resumeRefs: refs, scope: 'online', fields: [{ label: '当前职位', value: 'Java 后端开发' }], assessments, analysis: 'Java职责匹配，支付经历待核实。' }) }
 
 test('starting rejects a platform not connected to the current job before browser activity or platform lookups', async () => {
   let lookups = 0
@@ -166,7 +194,7 @@ test('starting rejects a platform not connected to the current job before browse
 
 test('platform job selection precedes filters and candidate reads, even with auto greeting off', async () => {
   const selector = { ref: 'job-selector', role: 'combobox', tagName: 'div', name: '职位', value: '不限职位' }
-  const searchItems = [selector, { ref: 'job-choice', role: 'option', name: '平台Java研发工程师' },
+  const searchItems = [selector, { ref: 'job-choice', parentRef: 'job-selector', role: 'option', name: '平台Java研发工程师' },
     { ref: 'exp', role: 'button', name: '工作经验：3-5年' }, { ref: 'edu', role: 'button', name: '学历：本科及以上' }]
   const out = await fixture(async tools => {
     await tools.execute('sourcing_define_requirements', { keyword: 'Java', criteria })
@@ -192,7 +220,7 @@ test('platform job selection precedes filters and candidate reads, even with aut
   assert.equal(out.diagnostics.filter(row => row.event === 'sourcing.search_prepared').length, 2)
 })
 
-test('Liepin uses the top recruiting-position menu and never types the job into the resume-position filter', async () => {
+test('Liepin guides the top recruiting-position route and verifies its result while allowing model navigation', async () => {
   const selector = { ref: 'top-job', role: 'div', name: '不限职位', hasPopup: 'listbox', bounds: { x: 40, y: 42, width: 100, height: 30 } }
   const searchItems = [selector,
     { ref: 'resume-job', role: 'combobox', tagName: 'input', name: '搜索职位名称', value: '' },
@@ -201,11 +229,9 @@ test('Liepin uses the top recruiting-position menu and never types the job into 
   const out = await fixture(async tools => {
     assert.match(tools.opts.system, /顶部大搜索框最左侧/)
     await tools.execute('sourcing_define_requirements', { keyword: 'Java', criteria })
-    await assert.rejects(tools.execute('browser_type', { ...tools.identity(), ref: 'resume-job', text: '平台Java研发工程师' }), /SOURCING_POSITION_ROUTE_REQUIRED/)
-    await assert.rejects(tools.execute('browser_click', { ...tools.identity(), ref: 'resume-job' }), /SOURCING_POSITION_ROUTE_REQUIRED/)
-    await assert.rejects(tools.execute('browser_click', { ...tools.identity(), ref: 'top-choice' }), /NAVIGATION_UNVERIFIED/)
+    await tools.execute('browser_click', { ...tools.identity(), ref: 'resume-job' })
+    await assert.rejects(select(tools), /SEARCH_CONDITIONS_UNVERIFIED/)
     await tools.execute('browser_click', { ...tools.identity(), ref: 'top-job' })
-    await assert.rejects(tools.execute('browser_click', { ...tools.identity(), ref: 'unrelated-job' }), /NAVIGATION_UNVERIFIED/)
     await tools.execute('browser_click', { ...tools.identity(), ref: 'top-choice' })
     await tools.execute('sourcing_confirm_search', { ...tools.identity(), mode: 'position', ref: 'top-job', filters: [{ field: 'city', ref: 'city', quote: '上海' }] })
     await select(tools); await record(tools)
@@ -265,18 +291,19 @@ test('sourcing diagnostics explain a rejected entry and an unsaved candidate wit
   const out = await fixture(async tools => {
     tools.setBody('陈先生 Java 后端开发 工作经历：负责业务服务。 private-contact@example.test 13912345678')
     await search(tools); await select(tools)
+    await tools.openResume()
     await tools.execute('sourcing_read_resume', { ...tools.identity(), identityRef:'resume',resumeRefs:['resume'] })
-    await assert.rejects(tools.execute('browser_click',{...tools.identity(),ref:'avatar'}), /SOURCING_NAVIGATION_UNVERIFIED/)
+    await assert.rejects(tools.execute('browser_click',{...tools.identity(),ref:'delete'}), /SOURCING_READ_ONLY/)
     await tools.execute('sourcing_finish',{status:'stopped',reason:'入口校验未通过'})
   }, {logging:true})
   const rejected=out.diagnostics.find(row=>row.event==='sourcing.navigation_rejected')
   assert.equal(rejected.inputDispatched,false);assert.equal(rejected.validationStage,'navigation_policy')
-  assert.equal(rejected.target.ref,'avatar');assert.equal(rejected.target.targetRole,'img');assert.equal(rejected.target.targetTag,'span')
-  assert.equal(rejected.target.candidateRelation,'context-contains');assert.deepEqual(rejected.target.controlTerms,['头像'])
-  assert.deepEqual(rejected.target.targetStates,['occluded']);assert.ok(rejected.target.targetLabelKey)
-  assert.equal(out.calls.filter(name=>name==='browser_click').length,1,'rejected click is not dispatched')
+  assert.equal(rejected.target.ref,'delete');assert.equal(rejected.target.targetRole,'button')
+  assert.equal(rejected.target.candidateRelation,'context-contains')
+  assert.ok(rejected.target.targetLabelKey)
+  assert.equal(out.calls.filter(name=>name==='browser_click').length,2,'only search and opening details are dispatched')
   const read=out.diagnostics.find(row=>row.event==='sourcing.resume_read')
-  assert.equal(read.saved,false);assert.equal(read.scope,'summary');assert.ok(read.capturedCharacters>0)
+  assert.equal(read.saved,false);assert.equal(read.scope,'online');assert.ok(read.capturedCharacters>0)
   const end=out.diagnostics.find(row=>row.event==='sourcing.channel_finished')
   assert.equal(end.candidateCount,0);assert.equal(end.candidatePending,true);assert.equal(end.pendingResumeCharacters,read.capturedCharacters)
   assert.equal(end.candidateKey,rejected.candidateKey)
@@ -284,33 +311,33 @@ test('sourcing diagnostics explain a rejected entry and an unsaved candidate wit
   for(const secret of ['陈先生','private-contact@example.test','13912345678','负责业务服务','不应记录的候选人文案'])assert.ok(!encoded.includes(secret),secret)
 })
 
-test('sourcing diagnostics distinguish missing score evidence, low-score skips and persisted results',async()=>{
+test('sourcing diagnostics distinguish missing list evidence, unverified skips and persisted results',async()=>{
   const skipped=await fixture(async tools=>{
     await search(tools)
-    await assert.rejects(tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],assessments:[{...assessments[0],quote:'不存在的候选人原文'},assessments[1]]}),/EVIDENCE_MISSING/)
-    const result=await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],assessments:[{...assessments[0],state:'partial'},assessments[1]]})
+    await assert.rejects(tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],listAssessments:[{field:'city',state:'match',quote:'不存在的候选人原文',reason:'城市依据'}]}),/EVIDENCE_MISSING/)
+    const result=await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],listAssessments:[{field:'city',state:'unknown',quote:'',reason:'列表未展示期望城市'}]})
     assert.equal(result.skipped,true)
     await finishExhausted(tools, '平台已明确没有更多结果')
   },{logging:true})
   const rejected=skipped.diagnostics.find(row=>row.event==='sourcing.assessment_rejected')
-  assert.equal(rejected.criteria[0].quoteFound,false);assert.ok(rejected.evidenceCharacters>0)
+  assert.deepEqual(rejected.listConditions,[{field:'city'}]);assert.ok(rejected.evidenceCharacters>0)
   assert.ok(!JSON.stringify(skipped.diagnostics).includes('不存在的候选人原文'))
   const preview=skipped.diagnostics.find(row=>row.event==='sourcing.candidate_preflight')
-  assert.equal(preview.decision,'skip_low_score');assert.equal(preview.score,30);assert.equal(preview.criteria[0].points,30)
+  assert.equal(preview.decision,'skip_unverified');assert.equal(preview.score,0);assert.equal(preview.matchedCount,0);assert.equal(preview.requiredCount,1)
   const saved=await fixture(async tools=>{await search(tools);await select(tools);await record(tools)},{logging:true})
   const result=saved.diagnostics.find(row=>row.event==='sourcing.candidate_recorded')
-  assert.equal(result.saved,true);assert.equal(result.score,60);assert.equal(result.candidateCount,1)
+  assert.equal(result.saved,true);assert.equal(result.score,100);assert.equal(result.candidateCount,1)
   assert.equal(saved.diagnostics.find(row=>row.event==='sourcing.channel_finished').candidatePending,false)
 })
 
-test('preflight scores related card evidence separately from the name identity fragment', async () => {
+test('preflight verifies related basic-information evidence separately from the name identity fragment', async () => {
   const bachelorCriteria = [criteria[0], { id: 'bachelor', label: '本科学历', quote: '本科', must: true, weight: 40 }]
   const out = await fixture(async tools => {
-    await tools.execute('sourcing_define_requirements', { keyword: 'Java', criteria: bachelorCriteria })
+    await tools.execute('sourcing_define_requirements', { keyword: 'Java', criteria: bachelorCriteria, listCriteria: [{field:'education',requirement:'本科',quote:'本科'}] })
     await tools.execute('browser_type', { ...tools.identity(), ref: 'query', text: 'Java' })
     await tools.execute('browser_click', { ...tools.identity(), ref: 'search' })
     await confirmKeyword(tools)
-    const selected = await tools.execute('sourcing_select_candidate', { ...tools.identity(), ref: 'card', name: '陈先生', evidenceRefs: ['skills', 'degree'], assessments: [assessments[0], { criterionId: 'bachelor', state: 'match', quote: '本科', reason: '同一卡片已披露学历' }] })
+    const selected = await tools.execute('sourcing_select_candidate', { ...tools.identity(), ref: 'card', name: '陈先生', evidenceRefs: ['skills', 'degree'], listAssessments: [{field:'education',state:'match',quote:'本科',reason:'同一卡片已披露学历'}] })
     assert.equal(selected.qualified, true); assert.equal(selected.score, 100)
     await tools.execute('sourcing_finish', { status: 'stopped', reason: '本测试仅核验列表初筛，不打开履历' })
   }, { splitEvidence: true, position: { ...position, description: 'Java 后端开发，本科' } })
@@ -321,7 +348,7 @@ test('failed preflight returns its verified source for correction and rejects an
   const out = await fixture(async tools => {
     await search(tools)
     const tool = tools.opts.tools.find(row => row.name === 'sourcing_select_candidate')
-    const request = { ...tools.identity(), ref: 'card', name: '陈先生', evidenceRefs: ['skills', 'degree'], assessments: [{ ...assessments[0], quote: 'Java 后端开发 本科' }, assessments[1]] }
+    const request = { ...tools.identity(), ref: 'card', name: '陈先生', evidenceRefs: ['skills', 'degree'], listAssessments: [{field:'city',state:'match',quote:'Java 后端开发 本科',reason:'测试逐字引用'}] }
     let failure
     try { await tools.execute(tool.name, request) } catch (error) { failure = error }
     assert.match(failure.message, /SOURCING_ASSESSMENT_EVIDENCE_MISSING/)
@@ -332,7 +359,7 @@ test('failed preflight returns its verified source for correction and rejects an
     await assert.rejects(tools.execute(tool.name, { ...request, evidenceRefs: ['otherDegree'] }), /CANDIDATE_EVIDENCE_INVALID/)
     const invalid = await tool.recover(new Error('CANDIDATE_EVIDENCE_INVALID'), request, tools.control.signal)
     assert.equal(invalid.candidateEvidence, undefined)
-    const corrected = await tools.execute(tool.name, { ...request, assessments })
+    const corrected = await tools.execute(tool.name, { ...request, listAssessments: [{field:'city',state:'match',quote:'本科',reason:'修正为当前卡片原文'}] })
     assert.equal(corrected.qualified, true)
     await tools.execute('sourcing_finish', { status: 'stopped', reason: '仅验证纠正后的初筛，不保存候选人' })
   }, { splitEvidence: true })
@@ -392,7 +419,7 @@ test('executor requires actual search submission and rejects borrowed resume evi
   }, { platforms: ['liepin', 'boss'] })
   assert.equal(out.job.status, 'completed'); assert.equal(out.job.candidates.length, 2)
   assert.deepEqual(out.job.candidates.map(row => row.platform), ['liepin', 'boss'])
-  assert.equal(out.job.candidates[0].score, 60); assert.equal(out.job.candidates[0].coverage, 60)
+  assert.equal(out.job.candidates[0].score, 100); assert.equal(out.job.candidates[0].coverage, 100)
   assert.equal(out.released, 1); assert.equal(out.job.results.length, 2)
 })
 test('new batches deduplicate previously captured identities without merging distinct platforms', async () => {
@@ -414,6 +441,7 @@ test('cancellation stops recording and releases browser ownership while retainin
 test('resume fragments survive scrolling and analyses can cite earlier verified chunks', async () => {
   const out = await fixture(async tools => {
     await search(tools); await select(tools)
+    await tools.openResume()
     tools.setBody('陈先生 工作经历：Java 后端开发。' + '负责订单服务设计、上线和数据库优化，参与核心服务交付。'.repeat(5))
     await tools.execute('browser_snapshot', { tabId: 1 })
     await tools.execute('sourcing_read_resume', { ...tools.identity(), identityRef: 'resume', resumeRefs: ['resume'] })
@@ -492,6 +520,7 @@ test('resume collection selects inspected candidate context just as list preflig
   const out = await fixture(async tools => {
     await search(tools); await select(tools)
     separate = true
+    await tools.openResume()
     await tools.execute('browser_snapshot', { tabId: 1 })
     const result = await tools.execute('sourcing_read_resume', { ...tools.identity(), identityRef: 'card', resumeRefs: ['resume'] })
     assert.ok(result.capturedCharacters > 0)
@@ -506,6 +535,7 @@ test('resume collection selects inspected candidate context just as list preflig
 test('resume recovery returns fresh refs and fine-grained reasons; changed evidence has its own bounded budget', async () => {
   const out = await fixture(async tools => {
     await search(tools); await select(tools)
+    await tools.openResume()
     const tool = tools.opts.tools.find(tool => tool.name === 'sourcing_record_candidate')
     const request = { ...tools.identity(), identityRef: 'resume', resumeRefs: ['other'], scope: 'online' }
     const priorKey = tool.failureKey(request)
@@ -527,6 +557,7 @@ test('resume recovery returns fresh refs and fine-grained reasons; changed evide
 test('AI may discard an unresolved candidate and continue without saving it or satisfying quota', async () => {
   const out = await fixture(async tools => {
     await search(tools); await select(tools)
+    await tools.openResume()
     await tools.execute('sourcing_read_resume', { ...tools.identity(), identityRef: 'resume', resumeRefs: ['resume'] })
     const skipped = await tools.execute('sourcing_skip_candidate', { reason: '详情关联无法确认' })
     assert.equal(skipped.skipped, true); assert.equal(skipped.saved, false); assert.ok(skipped.discardedCharacters > 0)
@@ -558,12 +589,13 @@ test('AI legacy scoring arguments are ignored instead of blocking navigation or 
     await search(tools)
     const selectTool = tools.opts.tools.find(row => row.name === 'sourcing_select_candidate')
     const selected = await selectTool.execute({ ...tools.identity(), ref: 'card', name: '陈先生', assessments: [{ forged: '模型自报100分' }], filterAssessments: [] }, tools.control.signal)
-    assert.equal(selected.score, 60)
+    assert.equal(selected.score, 100)
+    await tools.openResume()
     const recordTool = tools.opts.tools.find(row => row.name === 'sourcing_record_candidate')
     await recordTool.execute({ ...tools.identity(), identityRef: 'resume', resumeRefs: ['resume'], scope: 'online',
       fields: [{ label: '公司', value: '伪造公司' }], analysis: '伪造结论', assessments: [{ forged: '模型自报100分' }] }, tools.control.signal)
   })
-  assert.equal(out.job.candidates[0].score, 60)
+  assert.equal(out.job.candidates[0].score, 100)
   assert.doesNotMatch(JSON.stringify(out.job.candidates), /伪造|100分/)
 })
 test('native Enter has no ref and is authorized only after a successful focused keyword input', async () => {
@@ -614,58 +646,113 @@ test('minimum score is validated, defaults to 60, and accepts both 0 and 100',()
  for(const minimumScore of [0,30,100])assert.equal(sourcingStartSpec.parse({...input,minimumScore}).minimumScore,minimumScore)
  for(const minimumScore of [-1,101,30.5,'30',null,NaN])assert.equal(sourcingStartSpec.safeParse({...input,minimumScore}).success,false)
 })
-test('configured threshold governs preflight, final persistence, greetings, model goal and logs',async()=>{
+test('configured threshold governs detail persistence and greeting without changing list screening',async()=>{
  const partial=[{...assessments[0],state:'partial'},assessments[1]]
  const out=await fixture(async tools=>{
   assert.equal(tools.opts.goal.minimumScore,30);assert.ok(!tools.opts.system.includes('低于60分'))
   await search(tools)
   const selected=await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],assessments:partial})
-  assert.equal(selected.qualified,true);assert.equal(selected.score,30)
-  const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'summary',fields:[],assessments:partial,analysis:'部分符合'})
+  assert.equal(selected.qualified,true);assert.equal(selected.score,100)
+  await tools.openResume()
+  const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:partial,analysis:'部分符合'})
   assert.equal(saved.recorded,1)
   await greet(tools,saved.candidateKey)
  },{minimumScore:30,autoGreet:true,logging:true})
- assert.equal(out.job.minimumScore,30);assert.equal(out.job.candidates[0].score,30);assert.ok(out.calls.includes('greeting_click'))
- assert.equal(out.diagnostics.find(row=>row.event==='sourcing.candidate_preflight').minimumScore,30)
+ assert.equal(out.job.minimumScore,30);assert.equal(out.job.candidates[0].score,50);assert.ok(out.calls.includes('greeting_click'))
+ assert.equal(out.diagnostics.find(row=>row.event==='sourcing.candidate_preflight').minimumScore,undefined)
 })
-test('raising the threshold rejects preflight and a later score below the configured threshold is discarded',async()=>{
- const high=await fixture(async tools=>{await search(tools);assert.equal((await select(tools)).skipped,true);await finishExhausted(tools, '平台确认没有更多结果')},{minimumScore:80})
+test('raising the detail threshold never blocks a qualified list card, but rejects its low final score',async()=>{
+ const high=await fixture(async tools=>{await search(tools);assert.equal((await select(tools)).qualified,true);await tools.openResume();const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:[{...assessments[0],state:'partial'},assessments[1]],analysis:'部分符合'});assert.equal(saved.skipped,true);await finishExhausted(tools, '平台确认没有更多结果')},{minimumScore:80})
  assert.equal(high.job.candidates.length,0);assert.equal(high.job.skippedLowScore,1)
  const lower=await fixture(async tools=>{
   await search(tools);await select(tools)
-  const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'summary',fields:[],assessments:[{...assessments[0],state:'partial'},assessments[1]],analysis:'部分符合'})
+  await tools.openResume()
+  const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:[{...assessments[0],state:'partial'},assessments[1]],analysis:'部分符合'})
   assert.equal(saved.skipped,true);await finishExhausted(tools, '平台确认没有更多结果')
- },{minimumScore:40,autoGreet:true})
+ },{minimumScore:55,autoGreet:true})
  assert.equal(lower.job.candidates.length,0);assert.equal(lower.calls.includes('greeting_click'),false)
  const zero=await fixture(async tools=>{
   await search(tools)
   const unknown=assessments.map(row=>({...row,state:'unknown',quote:''}))
   assert.equal((await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],assessments:unknown})).qualified,true)
-  await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'summary',fields:[],assessments:unknown,analysis:'尚无已证实匹配项'})
+  await tools.openResume()
+  await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:unknown,analysis:'尚无已证实匹配项'})
  },{minimumScore:0})
  assert.equal(zero.job.candidates[0].score,0)
 })
-test('preflight below 60 skips without capturing personal information or opening details',async()=>{
+test('unknown required list evidence skips without retaining personal information or opening details',async()=>{
  const out=await fixture(async tools=>{
   await search(tools)
   await assert.rejects(tools.execute('browser_click',{...tools.identity(),ref:'detail'}),/PREFLIGHT_REQUIRED/)
-  const low=await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],assessments:assessments.map(row=>({...row,state:'unknown',quote:''}))})
+  const low=await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],listAssessments:[{field:'city',state:'unknown',quote:'',reason:'列表未展示期望城市'}]})
   assert.equal(low.skipped,true);assert.equal(low.score,0)
   await assert.rejects(tools.execute('browser_click',{...tools.identity(),ref:'detail'}),/PREFLIGHT_REQUIRED/)
   await assert.rejects(tools.execute('sourcing_read_resume',{...tools.identity(),identityRef:'card',resumeRefs:['card']}),/先选择/)
   await finishExhausted(tools, '平台确认没有更多结果')
  })
- assert.equal(out.job.candidates.length,0);assert.equal(out.job.results.length,0);assert.equal(out.job.skippedLowScore,1)
+ assert.equal(out.job.candidates.length,0);assert.equal(out.job.results.length,0);assert.equal(out.job.skippedUnverified,1)
  assert.doesNotMatch(JSON.stringify(out.job),/陈先生|订单服务/)
 })
-test('a qualified preflight cannot persist a resume or greet if final assessment drops below 60',async()=>{
+
+for (const sourceMode of ['recommend', 'search']) test(sourceMode+' list screening requires all four JD conditions and never uses the detail threshold', async () => {
+ const listCriteria = [
+  {field:'age',requirement:'35岁以下',quote:'年龄35岁以下'},
+  {field:'experience',requirement:'5-10年',quote:'工作经验5-10年'},
+  {field:'city',requirement:'北京',quote:'期望工作城市北京'},
+  {field:'education',requirement:'本科',quote:'学历本科'},
+ ]
+ const jobPosition = {...position,description:position.description+'；年龄35岁以下；工作经验5-10年；期望工作城市北京；学历本科'}
+ const body = '陈先生，32岁，工作经验8年，期望工作城市北京，学历本科'
+ for (const state of ['match','mismatch','unknown']) {
+  const out = await fixture(async tools => {
+   tools.setBody(body)
+   await tools.execute('browser_snapshot',{tabId:1})
+   await tools.execute('sourcing_define_requirements',{keyword:'Java',criteria})
+   if(sourceMode==='recommend') await tools.execute('sourcing_confirm_search',{...tools.identity(),ref:'position',mode:'position',filters:[]})
+   else {
+    await tools.execute('browser_type',{...tools.identity(),ref:'query',text:'Java'})
+    await tools.execute('browser_click',{...tools.identity(),ref:'search'})
+    await tools.execute('sourcing_confirm_search',{...tools.identity(),ref:'query',filters:[{field:'city',ref:'city',quote:'上海'},{field:'experience',ref:'experience',quote:'5-10年'},{field:'education',ref:'education',quote:'本科'}]})
+   }
+   const selected = await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],
+    listAssessments:listCriteria.map(c=>({field:c.field,state:c.field==='age'?state:'match',quote:c.field==='age'&&state==='unknown'?'':body,reason:'列表条件核验'})),
+    assessments:assessments.map(row=>({...row,state:'unknown',quote:''})),
+   })
+   assert.equal(selected.requiredCount,4)
+   assert.equal(selected.matchedCount,state==='match'?4:3)
+   assert.equal(selected.score,state==='match'?100:75)
+   assert.equal(selected.qualified,state==='match')
+   if(selected.qualified) await tools.openResume()
+   else await assert.rejects(tools.openResume(),/PREFLIGHT_REQUIRED/)
+   await tools.execute('sourcing_finish',{status:'stopped',reason:'仅核验四维列表初筛，不保存简历'})
+  },{sourceMode,position:jobPosition,listCriteria,minimumScore:state==='match'?100:0,logging:true,searchItems:[{ref:'experience',role:'combobox',name:'工作经验',value:'5-10年'},{ref:'education',role:'combobox',name:'学历',value:'本科及以上'}]})
+  assert.equal(out.job.status,'stopped',out.job.detail)
+  assert.equal(out.job.candidates.length,0)
+  assert.equal(out.diagnostics.find(row=>row.event==='sourcing.candidate_preflight').requiredCount,4)
+  assert.equal(out.job.skippedLowScore??0,0)
+ }
+})
+
+test('no explicit basic-information requirements allows detail reading despite zero list skill evidence',async()=>{
+ const out=await fixture(async tools=>{
+  tools.setBody('陈先生，列表仅有姓名及基本信息')
+  await search(tools)
+  const selected=await select(tools)
+  assert.equal(selected.qualified,true);assert.equal(selected.requiredCount,0);assert.equal(selected.score,null)
+  await tools.openResume()
+  await tools.execute('sourcing_finish',{status:'stopped',reason:'不限制列表条件，进入详情评估'})
+ },{listCriteria:[],minimumScore:100})
+ assert.equal(out.job.status,'stopped',out.job.detail)
+})
+test('missing core evidence is retained for review without greeting or consuming a qualified quota',async()=>{
  const out=await fixture(async tools=>{
   await search(tools);await select(tools)
-  const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'summary',fields:[],assessments:assessments.map(row=>({...row,state:'unknown',quote:''})),analysis:'缺少证据'})
-  assert.equal(saved.skipped,true)
+  await tools.openResume()
+  const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:assessments.map(row=>({...row,state:'unknown',quote:''})),analysis:'缺少证据'})
+  assert.equal(saved.recorded,0);assert.equal(saved.reviewCount,1);assert.equal(saved.needsGreeting,false);assert.equal(tools.opts.isComplete(),false)
   await finishExhausted(tools, '平台确认没有更多结果')
  },{autoGreet:true})
- assert.equal(out.job.candidates.length,0);assert.equal(out.job.greetings.length,0);assert.equal(out.calls.includes('greeting_click'),false)
+ assert.equal(out.job.candidates.length,1);assert.equal(out.job.candidates[0].scoring.needsReview,true);assert.equal(out.job.greetings.length,0);assert.equal(out.calls.includes('greeting_click'),false)
 })
 test('last accepted candidate is greeted before quota completion and actual click is persisted',async()=>{
  const out=await fixture(async tools=>{
@@ -755,7 +842,7 @@ test('recommendation session blocks keyword tools and observed search destinatio
   }, { sourceMode: 'recommend', searchItems: [{ ref: 'search-route', role: 'link', name: '高级筛选', href: 'https://lpt.liepin.com/search' }] })
   assert.equal(out.job.status, 'completed', out.job.detail)
   assert.equal(out.job.candidates.length, 1)
-  assert.equal(out.calls.includes('browser_click'), false)
+  assert.equal(out.calls.filter(name => name === 'browser_click').length, 1, 'only the selected resume is opened')
   assert.equal(out.calls.includes('browser_type'), false)
 })
 
@@ -791,12 +878,12 @@ for (const state of ['unknown', 'mismatch']) test('recommendation '+state+' cond
     if (selected.qualified) {
       const saved = await record(tools)
       assert.equal(saved.skipped, true)
-    } else assert.equal(state, 'mismatch')
+    } else assert.equal(selected.skipped, true)
     await finishExhausted(tools, 'Verified end of recommendation list')
   }, { sourceMode: 'recommend', filterState: state, autoGreet: true })
   assert.equal(out.job.status, 'completed', out.job.detail)
   assert.equal(out.job.candidates.length, 0)
-  assert.equal(out.job.skippedByFilters, 1)
+  assert.equal((out.job.skippedByFilters ?? 0) + (out.job.skippedUnverified ?? 0), 1)
   assert.equal(out.calls.includes('greeting_click'), false)
 })
 
@@ -829,6 +916,21 @@ test('observed resume ID is saved, rechecked for greeting and deduplicates chang
  assert.equal(out.job.greetings[0].platformIdentity.id,'opaqueResume123')
  assert.equal(out.job.greetings[0].identityKind,'platform_id')
  assert.equal(out.calls.filter(c=>c==='greeting_click').length,1)
+})
+test('a duplicate gives a next-list action and a no-op skip cannot reset repeated duplicate selection',async()=>{
+ const out=await fixture(async tools=>{
+  await search(tools);await select(tools);await record(tools)
+  await tools.returnToList()
+  const duplicate=await select(tools)
+  assert.equal(duplicate.duplicate,true)
+  assert.ok(duplicate.candidateKey)
+  assert.match(duplicate.next,/无需调用skip/)
+  assert.equal((await tools.execute('sourcing_skip_candidate',{reason:'重复人选不应创建待处理状态'})).skipped,false)
+  await assert.rejects(select(tools),/SOURCING_DUPLICATE_REPEAT/)
+  await tools.execute('sourcing_finish',{status:'stopped',reason:'重复人选已明确处理'})
+ },{resumeId:'observedResume123',limit:2})
+ assert.equal(out.job.candidates.length,1)
+ assert.equal(out.job.scanned,1)
 })
 test('different resume IDs with identical display text do not inherit unknown history',async()=>{
  const out=await fixture(async tools=>{
@@ -864,4 +966,31 @@ test('list resume ID can authorize the already evaluated foreground detail witho
  assert.equal(out.job.status,'completed',out.job.detail)
  assert.equal(out.job.candidates[0].platformIdentity.id,'savedResume123')
  assert.equal(out.calls.filter(c=>c==='greeting_click').length,1)
+})
+
+
+test('supplement coverage is enforced before navigation and previous-role stability remains an independent bonus', async () => {
+  const supplement = '优先上一段工作经历时间超过2年的'
+  const tenure = { id: 'tenure', label: '上一段任职超过2年', quote: supplement, tier: 'bonus', must: false, weight: 5 }
+  const standard = [{ ...modelCriteria[0] }, { ...modelCriteria[1], weight: 5 }, tenure]
+  const coverage = [{ quote: supplement, criterionIds: ['tenure'], listFields: [] }]
+  const out = await fixture(async tools => {
+    assert.ok(tools.opts.system.includes(recruitmentMatchingSkill().content))
+    assert.deepEqual(tools.opts.goal.supplementParts, [supplement])
+    const define = tools.opts.tools.find(tool => tool.name === 'sourcing_define_requirements')
+    await assert.rejects(define.execute({ keyword: 'Java', criteria: standard, listCriteria: [], supplementCoverage: [] }, tools.control.signal), /SUPPLEMENT_UNCOVERED/)
+    await search(tools)
+    assert.deepEqual(tools.opts.goal.searchFilters, { city: '上海' })
+    tools.setBody('陈先生 Java 后端开发 本科 上海 工作经历：上家公司2020.01—2024.06，负责Java 后端开发及订单服务。')
+    await select(tools); await tools.openResume()
+    const saved = await tools.execute('sourcing_record_candidate', { ...tools.identity(), identityRef: 'resume', resumeRefs: ['resume'], scope: 'online', fields: [],
+      assessments: [{ ...assessments[0], state: 'partial' }, assessments[1], { criterionId: 'tenure', state: 'match', quote: '上家公司2020.01—2024.06', reason: '上一段任职超过4年', evidenceKind: 'direct', confidence: 'high' }], analysis: '核心能力部分符合，上一段任职稳定性加分' })
+    assert.equal(saved.recorded, 1)
+    assert.equal(saved.needsGreeting, false)
+  }, { supplement, criteria: standard, supplementCoverage: coverage, minimumScore: 50 })
+  assert.equal(out.job.status, 'completed', out.job.detail)
+  assert.equal(out.job.candidates[0].score, 55)
+  assert.equal(out.job.candidates[0].scoring.bonusScore, 5)
+  assert.equal(out.job.requirements.rubricVersion, 2)
+  assert.deepEqual(out.job.requirements.supplementCoverage, coverage)
 })

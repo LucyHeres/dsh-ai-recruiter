@@ -103,7 +103,8 @@ async function greetingFixture(platform, options = {}) {
     const page = () => {
       const positionItem = { ref: 'position',
         elementId: options.semanticPositionWithoutId && format === 'semantic' ? undefined : selectedPosition ? `job-${selectedTargetId}` : 'job-999',
-        role: 'tab', name: selectedPosition ? '数据工程师' : '其他职位', states: ['selected'] }
+        role: 'tab', name: selectedPosition ? '数据工程师' : '其他职位', states: ['selected'],
+        ...(options.businessOptions && selectedPosition ? { href: `${originOf(platform)}/recommend?jobId=${selectedTargetId}` } : {}) }
       const positionVisible = !options.ambiguousPosition && !((options.jobTrigger || options.sameNameOptions) && !selectedPosition)
       const result = { tabId: 1, snapshotId: `s${++snapshots}`, documentId: 'recommendation', format, frameId: 0,
         url: options.noJobQuery ? greetingUrl(platform).split('?')[0] : greetingUrl(platform), text: '', items: [
@@ -114,8 +115,8 @@ async function greetingFixture(platform, options = {}) {
             ...(panelOpen ? [{ ref: 'trigger-option', elementId: 'job-123', role: 'option', name: '数据工程师' }] : []),
           ] : []),
           ...(options.sameNameOptions ? [
-            { ref: 'same-a', elementId: 'job-123', role: 'option', name: '数据工程师', context: { text: '数据工程师 北京-朝阳区 3-5k' } },
-            { ref: 'same-b', elementId: 'job-456', role: 'option', name: '数据工程师', context: { text: '数据工程师 上海-浦东新区 6-8k' } },
+            { ref: 'same-a', elementId: 'job-123', ...(options.businessOptions ? { href: `${originOf(platform)}/recommend?jobId=123` } : {}), role: 'option', name: '数据工程师', context: { text: '数据工程师 北京-朝阳区 3-5k' } },
+            { ref: 'same-b', elementId: 'job-456', ...(options.businessOptions ? { href: `${originOf(platform)}/recommend?jobId=456` } : {}), role: 'option', name: '数据工程师', context: { text: '数据工程师 上海-浦东新区 6-8k' } },
           ] : []),
           ...recipients.flatMap((name, index) => [
             { ref: `card-${index}`, role: 'article', name: cardText(index), bounds: { x: 10, y: index * 160, width: 500, height: 150 } },
@@ -304,7 +305,7 @@ test('two same-name platform jobs without ID evidence stop immediately instead o
 
 test('an explicitly chosen platform job disambiguates two same-name options without a model turn', async () => {
   const out = await greetingFixture('liepin', { limit: 1, switchPosition: true, noJobQuery: true, sameNameOptions: true,
-    selectedPlatformJob: { id: '456', name: '数据工程师' },
+    businessOptions: true, selectedPlatformJob: { id: '456', name: '数据工程师' },
     platformJobs: [{ id: '123', name: '数据工程师' }, { id: '456', name: '数据工程师' }] })
   assert.equal(out.job.status, 'completed', out.job.detail); assert.equal(out.fallbacks.length, 0, out.job.detail)
   assert.ok(out.calls.some(call => call.name === 'browser_click' && call.args.ref === 'same-b'))
@@ -328,8 +329,8 @@ test('ticking page content cannot keep the preset stalled indefinitely', async (
   assert.match(out.job.detail, /PRESET_NO_PROGRESS/)
 })
 
-test('a target position whose element exposes a different platform job ID is never degraded into a pass', async () => {
-  const hide = page => { const item = page.items.find(item => item.ref === 'position'); if (item) item.elementId = 'wrong-job-456' }
+test('an explicit conflicting business job ID is never degraded into a name-only pass', async () => {
+  const hide = page => { page.url += '?jobId=456' }
   const out = await greetingFixture('liepin', { limit: 1, noJobQuery: true, mutatePage: hide,
     model: () => [{ name: 'browser_snapshot', args: { tabId: 1 } }] })
   assert.equal(out.sent.size, 0); assert.equal(out.job.status, 'failed')
@@ -567,4 +568,15 @@ test('multiple matching tabs without an active or preferred one are not arbitrar
   assert.equal(out.sent.size, 0)
   assert.ok(!out.calls.some(call => ['browser_open_tab', 'browser_navigate'].includes(call.name)))
   assert.ok(out.logs.some(row => row.event === 'recruitment.preset_paused' && row.reason === 'platform_tabs_ambiguous'))
+})
+
+
+test('a unique named position needs no platform mapping or DOM job ID for preset switching', async () => {
+  for (const platform of ['liepin', 'boss']) {
+    const out = await greetingFixture(platform, { limit: 1, switchPosition: true, noJobQuery: true, platformJobs: [],
+      mutatePage: page => { for (const item of page.items) if (['position', 'choose-position'].includes(item.ref)) item.elementId = 'random-widget-456' } })
+    assert.equal(out.job.status, 'completed', out.job.detail)
+    assert.equal(out.fallbacks.length, 0)
+    assert.ok(out.calls.some(call => call.name === 'browser_click' && call.args.ref === 'choose-position'))
+  }
 })

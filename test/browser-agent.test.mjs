@@ -9,14 +9,17 @@ const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.Scri
 const errorsSource = await readFile(new URL('../src/lib/browser-errors.ts', import.meta.url), 'utf8')
 const errorsCompiled = ts.transpileModule(errorsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
 const errorsUrl = `data:text/javascript;base64,${Buffer.from(errorsCompiled).toString('base64')}`
+const contextSource = ts.transpileModule(await readFile(new URL('../src/lib/llm-message-source.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
+const contextUrl = `data:text/javascript;base64,${Buffer.from(contextSource).toString('base64')}`
 const moduleSource = compiled.replace(/from ['"]@deepseek-ai\/dsh-llm['"]/g, `from ${JSON.stringify(import.meta.resolve('@deepseek-ai/dsh-llm'))}`)
   .replace(/from ['"]\.\/browser-errors\.js['"]/g, `from ${JSON.stringify(errorsUrl)}`)
+  .replace(/from ['"]\.\/llm-message-source\.js['"]/g, `from ${JSON.stringify(contextUrl)}`)
 const { runBrowserAgent } = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}`)
 const route = { provider: 'host-test', model: 'specific-default', reasoningEffort: 'high' }
 const call = (id, name, args = {}) => ({ type: 'tool-call', id, name, arguments: JSON.stringify(args) })
 const text = value => ({ type: 'text', text: value })
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
-const replies = request => request.messages.flatMap(message => message.content.filter(block => block.type === 'tool-result'))
+const replies = request => request.messages.filter(message => message.role === 'tool')
 function model(turns) {
   const requests = []
   return { requests, async *stream(options) {

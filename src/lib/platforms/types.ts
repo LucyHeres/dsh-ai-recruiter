@@ -30,7 +30,7 @@ export interface RecruitmentPlatform {
   sourcingSearchEntry?: string
   sourcingHints: string
   sourcingSearchHints?: string
-  observationFormat?: 'semantic'
+  observationFormat?: 'dom' | 'semantic'
   createSearchEvidence(broker: AgentBrowserTools): SearchEvidence
   createPositionRoute(names: string[], sourceMode?: 'recommend' | 'search'): PositionRoute
   createSourcingDriver?(context: SourcingDriverContext): SourcingDriver

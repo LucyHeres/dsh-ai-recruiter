@@ -1,4 +1,5 @@
 import { positionOverview } from './position-overview.js'
+import { sourcingQualifiedCount } from '../shared/sourcing-score.js'
 import { greetingHistory } from './greeting-history.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
@@ -19,8 +20,13 @@ import type { ResumeImport } from './resume-import.js'
 import type { WorkbenchTaskExecutor } from './task-executor.js'
 import { candidateCommunication, communicationIndex, sourcingResults, taskHistoryPage } from './sourcing-review.js'
 import { SourcingAgent } from './sourcing-agent.js'
+import { AgentBrowserTools } from './agent-browser-tools.js'
+import { candidateContactKeys, candidateResumeReceipt, readCandidateContacts } from './candidate-contact.js'
+import { assertCommunicationRead, syncPlatformCommunication } from './communication-sync.js'
+import { syncLiepinResumes, LIEPIN_RESUME_ORIGINS } from './liepin-resume-sync.js'
+import { candidateAttachments, receivedResumes, selectReceivedResumes, cachedReceivedFile } from './received-resume-store.js'
 import type { BrowserAgentRunner } from './host-browser-agent.js'
-import type { SourcingJob, SourcingPosition } from '../shared/sourcing.js'
+import type { CommunicationSyncResult, SourcingCandidate, SourcingJob, SourcingPosition } from '../shared/sourcing.js'
 import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, TASK_FEATURES, type Platform, type TaskKind, type ConnectionState, type GreetingJob, type JobOption, type WorkbenchJob, type WorkbenchState } from '../shared/workbench.js'
 
 const platformSpec = z.enum(['liepin', 'boss'])
@@ -147,23 +153,23 @@ export class Workbench extends TypertRemoteService {
     const { jobId } = z.object({ jobId: z.string().min(1).max(64) }).strict().parse(request)
     await this.initialize()
     return (await this.store.list<SourcingJob>('sourcing-')).filter(job => job.kind === 'talent_sourcing' && job.jobId === jobId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50).map(({ candidates, ...job }) => ({ ...job, candidateCount: candidates.length }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50).map(({ candidates, ...job }) => ({ ...job, candidateCount: sourcingQualifiedCount({ ...job, candidates }) }))
   }
   @Remote
   async sourcingBatch(request: unknown) {
     const { id, jobId } = z.object({ id: idSpec, jobId: z.string().min(1).max(64) }).strict().parse(request)
     const job = await this.store.find<SourcingJob>(`sourcing-${id}`)
     if (!job || job.kind !== 'talent_sourcing' || job.jobId !== jobId) throw new Error('该职位下没有这轮寻聘记录')
-    const greetings = await greetingHistory(this.store)
-    const communications = communicationIndex(greetings)
-    return { ...job, candidates: job.candidates.map(candidate => ({ ...candidate, communication: candidateCommunication(candidate, communications) })) }
+    const [greetings, contacts, attachments] = await Promise.all([greetingHistory(this.store), readCandidateContacts(this.store), receivedResumes(this.store)])
+    const communications = communicationIndex(greetings, contacts)
+    return { ...job, candidates: job.candidates.map(candidate => ({ ...candidate, communication: candidateCommunication(candidate, communications), ...candidateResumeReceipt(candidate, contacts), resumeAttachments: candidateAttachments(candidate, jobId, attachments) })) }
   }
   @Remote
   async sourcingResults(request: unknown) {
     const { jobId, roundId } = z.object({ jobId: z.string().min(1).max(64), roundId: z.union([z.literal('all'), idSpec]).default('all') }).strict().parse(request)
     await this.initialize()
-    const [jobs, greetings] = await Promise.all([this.store.list<SourcingJob>('sourcing-'), this.store.list<WorkbenchJob>('greeting-')])
-    return sourcingResults(jobs, jobId, roundId, communicationIndex([...greetings, ...jobs]))
+    const [jobs, greetings, contacts, attachments] = await Promise.all([this.store.list<SourcingJob>('sourcing-'), this.store.list<WorkbenchJob>('greeting-'), readCandidateContacts(this.store), receivedResumes(this.store)])
+    return sourcingResults(jobs, jobId, roundId, communicationIndex([...greetings, ...jobs], contacts), contacts, attachments)
   }
   @Remote
   async sourcingCandidate(request: unknown) {
@@ -172,8 +178,66 @@ export class Workbench extends TypertRemoteService {
     if (!job || job.kind !== 'talent_sourcing' || job.jobId !== jobId) throw new Error('该职位下没有这轮寻聘记录')
     const candidate = job.candidates.find(row => row.key === key)
     if (!candidate) throw new Error('该轮次没有这位候选人的评估记录')
-    const communications = communicationIndex(await greetingHistory(this.store))
-    return { jobId, roundId: id, candidate: { ...candidate, communication: candidateCommunication(candidate, communications) }, position: job.position, requirements: job.requirements, supplement: job.supplement }
+    const [greetings, contacts, attachments] = await Promise.all([greetingHistory(this.store), readCandidateContacts(this.store), receivedResumes(this.store)])
+    const communications = communicationIndex(greetings, contacts)
+    return { jobId, roundId: id, candidate: { ...candidate, communication: candidateCommunication(candidate, communications), ...candidateResumeReceipt(candidate, contacts), resumeAttachments: candidateAttachments(candidate, jobId, attachments) }, position: job.position, requirements: job.requirements, supplement: job.supplement }
+  }
+  @Remote
+  async downloadReceivedResume(request: unknown): Promise<import('../shared/sourcing.js').ResumeDownloadChunk> {
+    const { jobId, roundId, key, attachmentId, offset } = z.object({ jobId: z.string().min(1).max(64), roundId: idSpec,
+      key: z.string().regex(/^[a-f0-9]{64}$/), attachmentId: z.string().regex(/^[a-f0-9]{64}$/), offset: z.number().int().min(0).max(20 * 1024 * 1024).default(0) }).strict().parse(request)
+    const [row] = await selectReceivedResumes(this.store, jobId, roundId, [attachmentId], key)
+    const file = await cachedReceivedFile(this.store, row)
+    if (!file) throw new Error('附件尚未取得或已失效，请先同步平台简历')
+    if (offset >= file.blob.size) throw new Error('附件读取位置无效')
+    const bytes = Buffer.from(await file.blob.slice(offset, offset + 96 * 1024).arrayBuffer())
+    return { fileName: file.fileName, mimeType: file.blob.type, totalSize: file.blob.size, offset, base64: bytes.toString('base64'), eof: offset + bytes.length === file.blob.size }
+  }
+  @Remote
+  async uploadReceivedResumes(request: unknown) {
+    const input = z.object({ id: idSpec, jobId: z.string().min(1).max(64), roundId: z.union([z.literal('all'), idSpec]),
+      attachmentIds: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(500) }).strict().parse(request)
+    // Validate ownership before creating a task or looking up any file bytes.
+    await selectReceivedResumes(this.store, input.jobId, input.roundId, input.attachmentIds)
+    return this.startTask({ ...input, kind: 'resume_import', resumeSource: 'platform_received', confirmed: true })
+  }
+  @Remote
+  async syncCommunication(request: unknown, requestedSignal?: AbortSignal): Promise<CommunicationSyncResult> {
+    const { jobId } = z.object({ jobId: z.string().min(1).max(64) }).strict().parse(request)
+    await this.initialize()
+    const release = this.reserve(); let owned = false
+    const signal = requestedSignal ? AbortSignal.any([requestedSignal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000)
+    try {
+      const [jobs, greetings, contacts] = await Promise.all([this.store.list<SourcingJob>('sourcing-'), greetingHistory(this.store), readCandidateContacts(this.store)])
+      const index = communicationIndex(greetings, contacts), candidates = new Map<string, SourcingCandidate>()
+      for (const job of jobs.filter(job => job.jobId === jobId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))) for (const candidate of job.candidates) {
+        const key = candidateContactKeys(candidate)[0]!
+        if (!candidates.has(key)) candidates.set(key, { ...candidate, communication: candidateCommunication(candidate, index), ...candidateResumeReceipt(candidate, contacts) })
+      }
+      const result: CommunicationSyncResult = { checked: candidates.size, matched: 0, updated: 0, platforms: [] }
+      if (!candidates.size) return result
+      await this.begin(signal); owned = true
+      const tools = await this.browser.listTools(signal)
+      for (const platform of [...new Set([...candidates.values()].map(candidate => candidate.platform))]) {
+        const broker = new AgentBrowserTools(tools, (name, args, toolSignal) => this.call(name, args, toolSignal), {
+          origins: platform === 'liepin' ? LIEPIN_RESUME_ORIGINS : PLATFORMS[platform].origins, signal, confirmationId: `communication-read-${jobId}-${Date.now()}`,
+          hostTools: platform === 'liepin' ? ['browser_network_response', 'artifact_read'] : undefined,
+          observationFormat: 'dom', observationViewportOnly: true, observationWait: 'none', logger: this.logger })
+        broker.setBeforeCall(async call => { assertCommunicationRead(call, broker.currentPage()) })
+        try {
+          const synced = platform === 'liepin' ? await syncLiepinResumes(broker, [...candidates.values()], this.store, signal)
+            : await syncPlatformCommunication(broker, platform, [...candidates.values()], this.store, signal)
+          result.matched += synced.matched; result.updated += synced.updated
+          result.platforms.push({ platform, matched: synced.matched, detail: synced.detail })
+        } catch (error) {
+          signal.throwIfAborted()
+          if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN/.test(String(error))) throw error
+          result.platforms.push({ platform, matched: 0, detail: safeError(error) })
+        }
+      }
+      this.logger?.write('info', 'communication.synced', { checked: result.checked, matched: result.matched, updated: result.updated })
+      return result
+    } finally { try { if (owned) await this.call('browser_finish') } finally { release() } }
   }
   @Remote
   async taskHistory(request: unknown) {

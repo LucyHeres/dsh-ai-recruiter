@@ -56,7 +56,7 @@ test('packaged client registers a session sidebar tab and opens only the origina
 })
 
 test('conversation entry carries its own styles and announces the actual task state before the drawer opens', () => {
-  for (const [status,label] of [['queued','等待执行'],['running','进行中'],['stopping','停止中'],['completed','已完成'],['stopped','已停止'],['failed','执行失败'],['unknown','结果待核对']]) {
+  for (const [status,label] of [['queued','等待执行'],['running','进行中'],['stopping','停止中'],['completed','已完成'],['stopped','已停止'],['failed','执行失败'],['unknown','已停止']]) {
     const view=fixture()
     const {element}=view.render('conversation.session.header.actions','session-one',[{...snapshot,jobs:[{...job,status}]},undefined,''])
     const button=elements(element).find(row=>row?.type==='button')
@@ -79,7 +79,7 @@ test('packaged session panel shows click-based progress and candidate records wi
   const view = fixture()
   const { element } = view.render('sidebar.right.pane.tab', 'session-one', [snapshot, undefined, '', '', false, ''])
   assert.match(textOf(element), /林先生/)
-  assert.match(textOf(element), /已点击/)
+  assert.match(textOf(element), /已打招呼/)
   assert.ok(!textOf(element).includes('已确认沟通'))
   const progress = elements(element).find(item => item?.type === 'progress')
   assert.equal(progress.props.value, 1); assert.equal(progress.props.max, 5)

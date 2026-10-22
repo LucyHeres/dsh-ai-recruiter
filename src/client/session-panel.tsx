@@ -12,6 +12,7 @@ import type { SourcingJob } from '../shared/sourcing.js'
 import { SelectMenu } from './components/select-menu.js'
 import { SourcingPanel } from './features/sourcing-panel.js'
 import { taskResultRows } from '../shared/greeting-results.js'
+import { greetingLabel, greetingDetail, hasGreeted } from '../shared/communication.js'
 import styles from './style.css'
 import panelStyles from './session-panel.css'
 import entryStyles from './session-entry.css'
@@ -67,7 +68,7 @@ function SessionRecruitmentEntry({ sessionId, rpc, open }: PropsRuntime<'convers
   if (!latest && !state?.calls?.length && !error) return null
   const task = state?.jobs.find(job => job.id === state.activeJobId && active(job)) ?? state?.jobs.find(active) ?? latest
   const status = error || openError ? 'error' : task?.status
-  const label = openError ? '打开失败' : error ? '状态异常' : task ? statusLabels[task.status] : ''
+  const label = openError ? '打开失败' : error ? '状态异常' : task ? task.status === 'unknown' && task.kind !== 'resume_import' ? '已停止' : statusLabels[task.status] : ''
   return <span className="air-session-entry"><style>{entryStyles}</style><button type="button" className="air-session-entry-trigger" data-state={status || 'idle'} onClick={reveal} title={error || openError || '查看当前会话招聘任务进度'} aria-label={`查看招聘进度${label ? `，${label}` : ''}`}>
     <IdCardIcon aria-hidden="true" /><span>招聘进度</span>{label && <span className="air-session-entry-state">{label}</span>}<ChevronRightIcon className="air-session-entry-chevron" aria-hidden="true" />
   </button>{openError && <span className="air-session-entry-error" role="alert">{openError}</span>}</span>
@@ -166,18 +167,18 @@ export function SessionRecruitmentPanel({ sessionId, rpc, openWorkbench }: Props
       {legacy && <LegacyTask job={legacy} busy={!!busy} copied={copied} onStop={() => void perform('停止任务', async () => { await rpc('stop', { id: legacy.id }) })} onCopy={() => copyLog(legacy)} />}
       {!state && !error ? <p className="air-session-empty" role="status">正在读取当前会话任务…</p> : position ? <SourcingPanel key={sessionId + ':' + position.id} compact positions={options} positionId={position.id} executionId={executionId} rpc={rpc} state={workbench} locked={locked} pending={!!pending.current && !busy} busy={busy} onStart={start} onReconcile={reconcile} /> : <div className="air-session-empty"><h3>从一个职位开始招聘</h3><p>{preferred ? '最近涉及的职位暂不可用，请从上方重新选择。' : '选择上方职位，或在对话里说明要招聘的职位。'}</p></div>}
     </div>
-    {(!!state?.calls?.length || !!latest) && <details className="air-session-diagnostics"><summary>执行记录 <span>{state?.calls?.length || 0}</span><ChevronDownIcon aria-hidden="true" /></summary>{latest && <div className="air-session-log-action"><span>{taskFeature(latest.kind).label} · {statusLabels[latest.status]}</span><button type="button" className="air-text-button" disabled={!!busy} onClick={() => copyLog(latest)}>{copied === latest.id ? '日志已复制' : '复制操作日志'}</button></div>}<h3 className="air-session-diagnostic-label">工具调用记录</h3><ol className="air-session-calls">{(state?.calls || []).slice(0, 8).map((call, index) => <li key={call.at + index}><time>{new Date(call.at).toLocaleTimeString('zh-CN', { hour12: false })}</time><strong>{call.summary}</strong><span>{call.ok ? `${call.durationMs} ms` : `失败${call.code ? ` · ${call.code}` : ''}`}</span></li>)}</ol></details>}
+    {(!!state?.calls?.length || !!latest) && <details className="air-session-diagnostics"><summary>执行记录 <span>{state?.calls?.length || 0}</span><ChevronDownIcon aria-hidden="true" /></summary>{latest && <div className="air-session-log-action"><span>{taskFeature(latest.kind).label} · {latest.status === 'unknown' && latest.kind !== 'resume_import' ? '已停止' : statusLabels[latest.status]}</span><button type="button" className="air-text-button" disabled={!!busy} onClick={() => copyLog(latest)}>{copied === latest.id ? '日志已复制' : '复制操作日志'}</button></div>}<h3 className="air-session-diagnostic-label">工具调用记录</h3><ol className="air-session-calls">{(state?.calls || []).slice(0, 8).map((call, index) => <li key={call.at + index}><time>{new Date(call.at).toLocaleTimeString('zh-CN', { hour12: false })}</time><strong>{call.summary}</strong><span>{call.ok ? `${call.durationMs} ms` : `失败${call.code ? ` · ${call.code}` : ''}`}</span></li>)}</ol></details>}
   </section>
 }
 
 function LegacyTask({ job, busy, copied, onStop, onCopy }: { job: WorkbenchJob; busy: boolean; copied: string; onStop: () => void; onCopy: () => void }) {
-  const rows = taskResultRows(job), completed = rows.filter(row => row.stage === 'succeeded').length
-  return <details className="air-session-legacy" open={active(job)}><summary><b>{taskFeature(job.kind).label}进度</b><span>{statusLabels[job.status]}</span><strong>{completed} / {job.limit} {taskFeature(job.kind).unit}</strong><ChevronDownIcon aria-hidden="true" /></summary><div>
+  const rows = taskResultRows(job), completed = rows.filter(row => job.kind === 'greeting' ? hasGreeted(row) : row.stage === 'succeeded').length
+  return <details className="air-session-legacy" open={active(job)}><summary><b>{taskFeature(job.kind).label}进度</b><span>{job.status === 'unknown' && job.kind !== 'resume_import' ? '已停止' : statusLabels[job.status]}</span><strong>{completed} / {job.limit} {taskFeature(job.kind).unit}</strong><ChevronDownIcon aria-hidden="true" /></summary><div>
     <p>{job.jobName || PLATFORMS[job.platform].label}{job.destinationLabel && ` · ${job.destinationLabel}`}</p>
     <progress max={job.limit} value={completed} aria-label={taskFeature(job.kind).progressLabel} />
     <p className="air-session-phase">{phases[job.phase ?? ''] || '等待执行'}</p>
     <div className="air-session-actions">{active(job) && <button type="button" className="air-button air-button-outline" disabled={busy} onClick={onStop}>停止任务</button>}<button type="button" className="air-text-button" disabled={busy} onClick={onCopy}>{copied === job.id ? '日志已复制' : '复制操作日志'}</button></div>
-    <ol className="air-session-results">{rows.map(item => <li key={item.key}><div><strong>{item.name}</strong><span>{item.stage === 'succeeded' ? job.kind === 'greeting' ? item.confirmedAt ? '已确认沟通' : '已点击' : '已入库' : item.stage === 'unknown' ? '待核对' : item.stage === 'sending' ? '处理中' : item.stage === 'skipped' ? '已跳过' : '失败'}</span></div><p>{item.detail}</p></li>)}</ol>
+    <ol className="air-session-results">{rows.map(item => <li key={item.key}><div><strong>{item.name}</strong><span>{job.kind === 'greeting' ? greetingLabel(item) : item.stage === 'succeeded' ? '已入库' : item.stage === 'unknown' ? '待核对' : item.stage === 'sending' ? '处理中' : item.stage === 'skipped' ? '已跳过' : '失败'}</span></div><p>{job.kind === 'greeting' ? greetingDetail(item) : item.detail}</p></li>)}</ol>
   </div></details>
 }
 

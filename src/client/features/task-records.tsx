@@ -48,7 +48,7 @@ export function TaskRecords({ rpc, onClose, onSelect, onCopyLog, busy, copiedId,
               <span className="air-record-title"><b title={record.jobName || taskFeature(record.kind).label}>{record.jobName || taskFeature(record.kind).label}</b></span>
               <span className="air-record-meta"><small>{taskFeature(record.kind).label} · {PLATFORMS[record.platform].label}</small><time dateTime={record.createdAt}>{stamp(record.createdAt)}</time><small className="air-record-progress" title={taskFeature(record.kind).progressLabel}>{opening === record.id ? '正在打开…' : `${record.completed} / ${record.limit} ${taskFeature(record.kind).unit}`}</small></span>
             </span>
-            <span className={`air-record-status is-${record.status}`}>{states[record.status]}</span>
+            <span className={`air-record-status is-${record.status}`}>{record.status === 'unknown' && record.kind !== 'resume_import' ? '已停止' : states[record.status]}</span>
           </button>
           <button type="button" className="air-record-copy-log" title="复制该任务的开发日志和排查详情；内容可能包含候选人信息" disabled={!!busy || !!opening} onClick={() => onCopyLog(record.id)}>{copiedId === record.id ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}{busy === `复制操作日志:${record.id}` ? '读取中…' : copiedId === record.id ? '已复制' : '复制操作日志'}</button>
         </li>

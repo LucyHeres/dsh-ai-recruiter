@@ -1,8 +1,9 @@
 import type { TaskResult, WorkbenchJob } from './workbench.js'
+import { hasGreeted } from './communication.js'
 
 const personName = (value: string) => value.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase()
 const rank = (row: TaskResult) => row.stage === 'succeeded' && row.confirmedAt ? 5
-  : row.stage === 'unknown' ? 4 : row.stage === 'succeeded' ? 3 : row.stage === 'sending' ? 2 : 1
+  : hasGreeted(row) ? 4 : row.stage === 'unknown' ? 3 : row.stage === 'sending' ? 2 : 1
 
 /** One final outcome per candidate, preserving first-seen order. Raw attempts
  * remain untouched for diagnostics. Distinct verified profile identities stay

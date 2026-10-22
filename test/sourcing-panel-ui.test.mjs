@@ -13,14 +13,14 @@ const rounds = [{...current,number:2},{...current,id:'old',number:1,candidateCou
 const summaries = people.map((person,i)=>({...person,roundId:i?'new':'old',roundNumber:i?2:1,roundCreatedAt:current.createdAt,resultKey:`${i?'new':'old'}:${person.key}`}))
 const results = {jobId:'java',roundId:'all',rounds,current,candidates:summaries}
 const details = (i) => ({jobId:'java',roundId:i?'new':'old',candidate:people[i],requirements:{criteria:[{id:'java',label:i?'新轮要求':'旧轮要求',must:true,quote:i?'新的要求':'旧的要求',weight:100}]}})
-const indexes = {jobId:2,position:3,platforms:6,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,autoGreet:22,expanded:23}
+const indexes = {jobId:2,position:3,platforms:6,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,autoGreet:22,expanded:23,syncing:25,communicationNotice:26}
 function fixture(overrides={}, locked=true, compact=false, options={}) {
   const states=[[],false,'java',position,false,'',['liepin'],10,results,'all',details(1),'results','',{score:'all',communication:'all',platform:'all'},'analysis','',0,false,false,false,'score-desc',false,undefined,true]
   Object.entries(overrides).forEach(([name,value])=>states[indexes[name]]=value)
   const refs=[],starts=[],requests=[];let index=0,refIndex=0,effects=[]
   const react={...require('react'),useState:initial=>{const i=index++;if(states[i]===undefined)states[i]=typeof initial==='function'?initial():initial;return [states[i],v=>{states[i]=typeof v==='function'?v(states[i]):v}]},useRef:value=>{const i=refIndex++;return refs[i]??={current:value}},useEffect:(effect,deps)=>effects.push({effect,deps})}
   const module={exports:{}}
-  runInNewContext(source,{module,exports:module.exports,require:name=>name==='react'?react:require(name),AbortController,setTimeout,clearTimeout})
+  runInNewContext(source,{module,exports:module.exports,require:name=>name==='react'?react:require(name),AbortController,setTimeout:options.setTimeout??setTimeout,clearTimeout:options.clearTimeout??clearTimeout,crypto:require('node:crypto').webcrypto})
   const render=()=>{index=0;refIndex=0;effects=[];return module.exports.SourcingPanel({compact,executionId:options.executionId,rpc:async(...args)=>{requests.push(args);return options.rpc ? options.rpc(...args) : details(1)},state:options.state??{activeJobId:'new',jobs:[{...current,kind:'talent_sourcing'}]},locked,pending:options.pending??false,busy:options.busy??'',onStart:request=>starts.push(request),onReconcile(){}})}
   return {render,states,starts,requests,effects:()=>effects,set:(name,value)=>states[indexes[name]]=value,get:name=>states[indexes[name]]}
 }
@@ -35,7 +35,7 @@ test('all rounds are the default, cards keep percentage scores, and no favorites
  assert.match(text(cards(tree)[0]),/70/);assert.match(text(cards(tree)[1]),/65/)
  assert.doesNotMatch(text(tree),/收藏|摘要初评/)
  assert.doesNotMatch(text(cards(tree)[0]),/待核实|完整分析/)
- assert.equal(find(tree,row=>row.props.id==='air-filter-round'),undefined)
+ const roundFilter=find(tree,row=>row.props.id==='air-filter-round');assert.ok(roundFilter);assert.equal(roundFilter.props.label,'寻聘轮次');assert.ok(roundFilter.props.options.slice(1).every(option=>/2026/.test(option.label)&&!/[第轮]/.test(option.label)))
  const progress=find(tree,row=>row.type==='progress');assert.equal(progress.props.value,1);assert.equal(progress.props.max,10)
 })
 test('platform settings and submitted tasks only include the selected job connected platforms',()=>{
@@ -116,6 +116,79 @@ test('combination filters and preset sorting apply to candidates from all rounds
  select('air-filter-platform','boss');assert.equal(cards(view.render()).length,0);assert.match(text(view.render()),/暂无符合筛选/)
  button(view.render(),'查看全部').props.onClick();assert.equal(cards(view.render()).length,2)
 })
+test('communication has only greeted/not-greeted and receipt filtering stays independent',()=>{
+ const view=fixture({results:{...results,candidates:[{...summaries[0],communication:'uncertain',resumeReceived:true},{...summaries[1],communication:'recorded',resumeReceived:false}]}})
+ const filter=(id,value)=>find(view.render(),row=>row.props.id===id).props.onChange(value)
+ const communication=find(view.render(),row=>row.props.id==='air-filter-communication')
+ assert.deepEqual(Array.from(communication.props.options,row=>row.label),['不限','已打招呼','未打招呼'])
+ assert.doesNotMatch(text(view.render()),/招呼结果待确认|招呼待确认|无招呼记录/)
+ filter('air-filter-resume-received','received');assert.equal(cards(view.render()).length,1)
+ assert.match(text(cards(view.render())[0]),/未打招呼.*收到简历/)
+ filter('air-filter-communication','recorded');assert.equal(cards(view.render()).length,0)
+ button(view.render(),'查看全部').props.onClick();assert.equal(cards(view.render()).length,2)
+ filter('air-filter-resume-received','not_received');assert.match(text(cards(view.render())[0]),/已打招呼.*未收到简历/)
+})
+test('sync reads the selected position, disables reentry and refreshes result/detail data',async()=>{
+ let finish
+ const view=fixture({},false,false,{rpc:()=>new Promise(resolve=>{finish=resolve})})
+ const sync=button(view.render(),'同步平台简历');assert.equal(sync.props.disabled,false)
+ sync.props.onClick();sync.props.onClick();assert.equal(view.requests.length,1)
+ assert.equal(view.requests[0][0],'syncCommunication');assert.equal(view.requests[0][1].jobId,'java')
+ assert.equal(button(view.render(),'正在同步…').props.disabled,true)
+ finish({checked:2,matched:1,updated:1,platforms:[{platform:'liepin',matched:1,detail:'已同步'}]})
+ await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(view.get('syncing'),false);assert.equal(view.get('reload'),1)
+ assert.match(text(view.render()),/本次核对 2 位候选人，匹配 1 人，更新 1 人/)
+ assert.equal(button(fixture().render(),'同步平台简历').props.disabled,true,'browser task lock also protects the sync action')
+})
+test('failed/aborted sync preserves received data and changing position aborts obsolete requests',async()=>{
+ const received={...results,candidates:summaries.map(row=>({...row,resumeReceived:true}))}
+ const failed=fixture({results:received},false,false,{rpc:async()=>{throw new Error('请先登录平台')}})
+ button(failed.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
+ assert.match(text(failed.render()),/请先登录平台/);assert.equal(failed.get('syncing'),false)
+ assert.equal(find(failed.render(),row=>row.props.className==='air-feedback-toast is-error').props.role,'alert')
+ assert.equal(failed.get('error'),'','sync failure also uses a transient toast')
+ assert.ok(cards(failed.render()).every(row=>/(?:^| )收到简历(?: |$)/.test(text(row))))
+ let finish
+ const view=fixture({},false,false,{rpc:()=>new Promise(resolve=>{finish=resolve})})
+ view.render();const cleanup=view.effects().find(row=>row.deps?.length===1&&row.deps[0]==='java').effect()
+ button(view.render(),'同步平台简历').props.onClick();const requestSignal=view.requests[0][2]
+ cleanup();assert.equal(requestSignal.aborted,true)
+ view.set('jobId','another');view.render();view.effects().find(row=>row.deps?.length===1&&row.deps[0]==='another').effect()
+ finish({checked:2,matched:1,updated:1,platforms:[]});await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(view.get('syncing'),false);assert.equal(view.get('communicationNotice'),undefined);assert.equal(view.get('reload'),0)
+})
+function noticeClock(){
+ let now=0,sequence=0;const timers=new Map()
+ return {setTimeout(callback,delay){const id=++sequence;timers.set(id,{at:now+delay,callback});return id},clearTimeout(id){timers.delete(id)},advance(ms){now+=ms;for(const[id,timer]of timers)if(timer.at<=now){timers.delete(id);timer.callback()}},pending:()=>timers.size}
+}
+const feedbackToast=tree=>find(tree,row=>row.props.className?.startsWith('air-feedback-toast'))
+function mountNoticeTimer(view){view.render();return view.effects().find(row=>row.deps?.length===1&&row.deps[0]===view.get('communicationNotice')).effect()}
+test('sync shows a result toast only after completion and removes it after exactly three seconds',async()=>{
+ let finish;const clock=noticeClock()
+ const view=fixture({},false,false,{...clock,rpc:()=>new Promise(resolve=>{finish=resolve})})
+ button(view.render(),'同步平台简历').props.onClick()
+ assert.equal(feedbackToast(view.render()),undefined)
+ finish({checked:2,matched:1,updated:1,platforms:[]});await new Promise(resolve=>setImmediate(resolve))
+ const toast=feedbackToast(view.render());assert.equal(toast.props.role,'status');assert.match(text(toast),/本次核对 2 位候选人/)
+ assert.equal(find(view.render(),row=>row.props.className==='air-talent-feedback'),undefined,'finished results do not occupy the toolbar')
+ mountNoticeTimer(view);clock.advance(2999);assert.ok(feedbackToast(view.render()))
+ clock.advance(1);assert.equal(feedbackToast(view.render()),undefined);assert.equal(clock.pending(),0)
+})
+test('identical sync results receive a fresh three-second lifetime and cleanup cancels the timer',async()=>{
+ const clock=noticeClock(),result={checked:2,matched:1,updated:1,platforms:[]}
+ const view=fixture({},false,false,{...clock,rpc:async()=>result})
+ button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
+ const first=view.get('communicationNotice'),cleanup=mountNoticeTimer(view)
+ clock.advance(2000)
+ button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
+ assert.notEqual(view.get('communicationNotice'),first)
+ cleanup();mountNoticeTimer(view);clock.advance(2999);assert.ok(feedbackToast(view.render()))
+ clock.advance(1);assert.equal(feedbackToast(view.render()),undefined)
+ button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
+ const onUnmount=mountNoticeTimer(view),notice=view.get('communicationNotice')
+ onUnmount();assert.equal(clock.pending(),0);clock.advance(3000);assert.equal(view.get('communicationNotice'),notice,'an unmounted component is not updated')
+})
 test('switching positions cannot display cached results and candidate navigation uses evaluation identity',()=>{
  const switched=fixture({jobId:'different'}).render();assert.equal(cards(switched).length,0);assert.equal(find(switched,row=>row.type==='article'),undefined)
  const view=fixture();button(view.render(),'下一位候选人').props.onClick();assert.equal(view.get('selectedKey'),summaries[0].resultKey);assert.equal(view.get('mobile'),true)
@@ -163,7 +236,7 @@ test('drawer defers resume detail reads until a candidate is opened, then preser
  const detailEffect=()=>view.effects().find(row=>row.deps?.length===7&&row.deps[1]==='java')
  detailEffect().effect();await new Promise(resolve=>setImmediate(resolve))
  assert.equal(view.requests.length,0)
- cards(tree)[0].props.onClick();tree=view.render()
+ find(cards(tree)[0],row=>row.props.className==='air-sourcing-person-select').props.onClick();tree=view.render()
  const cleanup=detailEffect().effect();await new Promise(resolve=>setImmediate(resolve))
  assert.equal(view.requests.length,1);assert.equal(view.requests[0][0],'sourcingCandidate')
  button(tree,'候选名单').props.onClick();assert.equal(view.get('mobile'),false)
@@ -240,7 +313,7 @@ test('conversation results stay pinned to one execution through filters, refresh
   button(tree,'查看全部').props.onClick()
   tree=view.render();assert.equal(cards(tree).length,1)
   assert.equal(button(tree,'重置'),undefined,'execution scope is not a removable filter')
-  button(tree,'刷新结果').props.onClick();view.render()
+  assert.equal(button(tree,'刷新结果'),undefined);assert.equal(find(tree,row=>row.props.id==='air-filter-round'),undefined);view.render()
   const refreshCleanup=poll().effect()
   try {await new Promise(resolve=>setImmediate(resolve));assert.equal(view.requests.at(-1)[1].roundId,'new')}
   finally {refreshCleanup()}
@@ -251,4 +324,55 @@ test('conversation results stay pinned to one execution through filters, refresh
   const before=view.requests.length;poll().effect();assert.equal(view.requests.length,before)
   assert.equal(cards(view.render()).length,0)
  } finally {cleanup()}
+})
+
+test('talent toolbar uploads only unimported attachments in the current filtered round and never nests download buttons',async()=>{
+ const ids=['a'.repeat(64),'b'.repeat(64),'c'.repeat(64),'d'.repeat(64)]
+ const withFiles={...results,candidates:[{...summaries[0],resumeReceived:true,resumeAttachments:[{id:ids[0],fileName:'first.pdf'},{id:ids[1],fileName:'saved.pdf',uploadedAt:'now'},{id:ids[2],fileName:'stopped.pdf',uploadStopped:true}]},{...summaries[1],resumeReceived:true,resumeAttachments:[{id:ids[3],fileName:'latest.pdf'}]}]}
+ let finish
+ const view=fixture({results:withFiles},false,false,{state:{jobs:[]},rpc:()=>new Promise(resolve=>{finish=resolve})})
+ let tree=view.render()
+ assert.ok(button(tree,'同步平台简历'));assert.equal(button(tree,'刷新结果'),undefined)
+ assert.ok(button(tree,'上传未入库简历（2）'))
+ for(const control of elements(tree).filter(row=>row?.type==='button'))assert.equal(elements(control.props.children).filter(row=>row?.type==='button').length,0)
+ find(tree,row=>row.props.id==='air-filter-score').props.onChange('70')
+ tree=view.render();const upload=button(tree,'上传未入库简历（1）');assert.equal(upload.props.disabled,false)
+ upload.props.onClick();upload.props.onClick();assert.equal(view.requests.length,1,'double click cannot start two batch tasks')
+ assert.equal(view.requests[0][0],'uploadReceivedResumes');assert.equal(view.requests[0][1].jobId,'java');assert.equal(view.requests[0][1].roundId,'all')
+ assert.deepEqual(Array.from(view.requests[0][1].attachmentIds),[ids[3]])
+ assert.equal(button(view.render(),'正在启动上传…').props.disabled,true)
+ finish({id:'upload-task'});await new Promise(resolve=>setImmediate(resolve))
+ assert.match(text(view.render()),/当前职位 · 新简历 · 未处理/)
+ view.set('roundId','old');view.set('results',{...withFiles,roundId:'old',candidates:[withFiles.candidates[0]]})
+ find(view.render(),row=>row.props.id==='air-filter-score').props.onChange('all')
+ assert.ok(button(view.render(),'上传未入库简历（1）'))
+})
+test('active attachment upload exposes progress and stop within the same talent list',async()=>{
+ const task={id:'upload',kind:'resume_import',resumeSource:'platform_received',jobId:'java',status:'running',detail:'1/2：正在提交入库'}
+ const view=fixture({},true,false,{state:{activeJobId:task.id,jobs:[task]},rpc:async()=>({stopping:true})})
+ const tree=view.render();assert.match(text(tree),/1\/2：正在提交入库/)
+ button(tree,'停止上传').props.onClick();assert.equal(view.requests[0][0],'stop');assert.equal(view.requests[0][1].id,'upload')
+ assert.equal(button(tree,'同步平台简历').props.disabled,true)
+})
+
+
+test('tiered rubrics show preferences, unknown facts, inference and interview questions without zero-point penalties', () => {
+ const criteria=[{id:'core',tier:'core',label:'核心开发能力',weight:100},{id:'bonus',tier:'bonus',label:'上一段任职超过2年',weight:10},{id:'verify',tier:'verify',label:'编码习惯与规范',weight:0}].map(row=>({...row,must:false,quote:row.label}))
+ const scoring={version:2,baseScore:0,bonusScore:0,assessedWeight:0,needsReview:true}
+ const candidate={...people[1],score:0,coverage:0,scoring,assessments:criteria.map(c=>({criterionId:c.id,state:'unknown',quote:'',reason:'材料不足',verificationQuestion:'请说明相关实际工作。'}))}
+ const requirements={rubricVersion:2,criteria,supplementCoverage:[{quote:'优先上一段工作经历超过2年',criterionIds:['bonus'],listFields:[]}]}
+ const result={...results,candidates:[{...summaries[1],score:0,scoring}]}
+ const view=fixture({results:result,detailData:{...details(1),candidate,requirements}}),tree=view.render()
+ assert.equal(cards(tree).length,1,'below-threshold review candidates must stay visible')
+ assert.match(text(tree),/待核实/);assert.match(text(tree),/暂评分/);assert.match(text(tree),/不计入达标人数/)
+ const rows=elements(tree).filter(row=>row?.props?.className==='air-sourcing-assessment')
+ assert.match(text(rows[0]),/不计入分母/)
+ assert.match(text(rows[1]),/加分项/);assert.match(text(rows[1]),/暂未加分/)
+ assert.match(text(rows[2]),/面试核实/);assert.match(text(rows[2]),/不影响评分/)
+ assert.match(text(tree),/优先上一段工作经历超过2年/)
+ assert.equal(find(rows[1],row=>row.props['aria-label']?.startsWith('本项得分')),undefined)
+ candidate.assessments[0]={criterionId:'core',state:'partial',quote:'接口规范',evidenceQuotes:['接口规范','优化重构'],evidenceKind:'inferred',confidence:'medium',reason:'项目实践间接支持',verificationQuestion:'请说明评审流程。'}
+ const updated=view.render()
+ assert.match(text(updated),/间接证据/);assert.match(text(updated),/中置信度/);assert.match(text(updated),/请说明评审流程/)
+ assert.ok(find(updated,row=>row.type==='blockquote'&&text(row).includes('优化重构')))
 })

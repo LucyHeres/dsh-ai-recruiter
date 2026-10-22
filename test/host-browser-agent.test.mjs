@@ -48,9 +48,50 @@ test('half-configured route and unsupported explicit effort fail before inferenc
   await assert.rejects(g.run(), /REASONING_UNSUPPORTED/); assert.equal(g.requests.length, 0)
 })
 
+test('unregistered default provider stops before metadata lookup or inference with recovery guidance', () => {
+  const f = fixture()
+  f.selected.provider = 'xinling-workbuddy'
+  f.llm.listProviders = () => [{ id: 'deepseek-official' }]
+  assert.throws(f.create, error => /HOST_MODEL_PROVIDER_UNAVAILABLE/.test(error.message)
+    && /xinling-workbuddy/.test(error.message) && /薪灵默认模型/.test(error.message) && /模型设置/.test(error.message))
+  assert.equal(f.requests.length, 0)
+  assert.equal(f.lookups.length, 0)
+  assert.equal(f.selected.provider, 'xinling-workbuddy')
+})
+
+test('unregistered dedicated provider requires fixing its configuration without falling back', () => {
+  const f = fixture({ browserAgentProvider: 'removed-provider', browserAgentModel: 'old-model' })
+  f.llm.listProviders = () => [{ id: 'existing-host' }]
+  assert.throws(f.create, error => /HOST_MODEL_PROVIDER_UNAVAILABLE/.test(error.message)
+    && /browserAgentProvider\/browserAgentModel/.test(error.message))
+  assert.equal(f.requests.length, 0)
+  assert.equal(f.lookups.length, 0)
+})
+
+test('registered dedicated route remains usable when the host default provider was removed', async () => {
+  const f = fixture({ browserAgentProvider: 'deepseek-official', browserAgentModel: 'deepseek-flash' })
+  f.selected.provider = 'xinling-workbuddy'
+  f.llm.listProviders = () => [{ id: 'deepseek-official' }]
+  await f.run()
+  assert.equal(f.requests[0].provider, 'deepseek-official')
+  assert.equal(f.selected.provider, 'xinling-workbuddy')
+})
+
 test('cancellation interrupts a noncooperative model-metadata lookup before inference', async () => {
   const f = fixture(), abort = new AbortController()
   f.llm.resolveModelInfo = async () => { abort.abort(); return new Promise(() => {}) }
   await assert.rejects(f.run({ signal: abort.signal }))
   assert.equal(f.requests.length, 0)
+})
+
+test('one task reuses successful model metadata across navigation and isolated assessment calls', async () => {
+  const f = fixture(), run = f.create()
+  const opts = () => ({ system: 'test', goal: {}, tools: [], signal: new AbortController().signal, maxTurns: 1 })
+  await run({ ...opts(), modelPurpose: 'navigation' })
+  await run({ ...opts(), modelPurpose: 'assessment' })
+  await run(opts())
+  assert.equal(f.requests.length, 3)
+  assert.equal(f.lookups.length, 1)
+  assert.ok(f.requests.every(request => request.reasoningEffort === 'low'))
+  assert.equal(f.selected.reasoningEffort, 'high')
 })

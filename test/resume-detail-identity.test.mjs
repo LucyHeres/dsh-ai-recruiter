@@ -24,6 +24,23 @@ test('a saved resume never authorizes another document, person, background butto
  assert.equal(matchesResumeDetail(binding,p,'other-candidate',['send']),false)
  assert.equal(bindResumeDetail(p,{...candidate,resumeText:'陈先生'}),undefined)
 })
+test('the current foreground source binds separately from accumulated sections, and only the activity hint is ignored',()=>{
+ const p=page(),saved={...candidate,resumeText:p.dialogs[0].text+'\n项目经历：另行读取的订单迁移、上线及维护职责。'}
+ assert.equal(bindResumeDetail(p,saved),undefined,'accumulated text cannot silently become a foreground grant')
+ const binding=bindResumeDetail(p,saved,p.dialogs[0].text)
+ assert.ok(binding)
+ const fresh=structuredClone(p)
+ fresh.dialogs[0].text=fresh.dialogs[0].text.replace('Java开发','Java开发\nTa在线，回复更快～')
+ assert.equal(matchesResumeDetail(binding,fresh,candidate.key,['send','identity']),true)
+ fresh.dialogs[0].text=fresh.dialogs[0].text.replace('数据库优化','市场推广')
+ assert.equal(matchesResumeDetail(binding,fresh,candidate.key,['send','identity']),false)
+ const other=page();other.dialogs[0].text='陈先生 工作经历：另一家公司的不同项目。'.repeat(20)
+ assert.equal(bindResumeDetail(other,saved,p.dialogs[0].text),undefined)
+ const blockedParent=structuredClone(p)
+ blockedParent.items.push({ref:'hidden-parent',role:'group',parentRef:'dialog',states:['hidden']})
+ delete blockedParent.items[2].dialogRef;blockedParent.items[2].parentRef='hidden-parent'
+ assert.equal(matchesResumeDetail(binding,blockedParent,candidate.key,['send']),false)
+})
 test('foreground recommended-job header is evidence; a resume job mention or same-name association ambiguity is not',()=>{
  const evidence=new LiepinSearchEvidence({getInspection:()=>undefined}),p=page()
  const job={jobId:'host-job',jobName:'Java开发',platformJobs:[{id:'linked-job',name:'Java开发'}]}

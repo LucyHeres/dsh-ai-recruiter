@@ -13,9 +13,9 @@ test('failed person shows the final failure, while later retry is shown as proce
   assert.equal(greetingResultRows([row('A', 'failed', 1), row('A', 'failed', 2)])[0].detail, 'failed-2')
   assert.equal(greetingResultRows([row('A', 'failed', 1), row('A', 'sending', 2)])[0].stage, 'sending')
 })
-test('confirmed success survives a failed later attempt; uncertain writes are not hidden behind legacy click-only success', () => {
+test('completed greetings remain completed in business projections while raw execution attempts are preserved', () => {
   assert.equal(greetingResultRows([row('A', 'succeeded', 1, { confirmedAt: 'confirmed' }), row('A', 'failed', 2)])[0].stage, 'succeeded')
-  assert.equal(greetingResultRows([row('A', 'succeeded', 1), row('A', 'unknown', 2)])[0].stage, 'unknown')
+  assert.equal(greetingResultRows([row('A', 'succeeded', 1), row('A', 'unknown', 2)])[0].stage, 'succeeded')
 })
 test('distinct verified profile identities with the same name are not collapsed into the wrong person', () => {
   const results = greetingResultRows([row('张先生', 'failed', 1, { key: 'profile-1', identityKind: 'url' }),

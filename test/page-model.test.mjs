@@ -273,8 +273,11 @@ test('position verification uses selected evidence and target ID, rejects wrong 
   p.items[2].states = []
   assert.throws(() => assertPositionEvidence(p, job, evidence), /POSITION_EVIDENCE_INVALID/)
   p.url = `${url}?jobid=123`
+  assert.throws(() => assertPositionEvidence(p, job, evidence), /POSITION_EVIDENCE_INVALID/)
+  p.items[2].states = ['selected']
   assertPositionEvidence(p, job, evidence)
-  p.url = url; p.selectedTabs = [{ name: '数据工程师', elementId: 'other-widget_123' }]
+  p.items[2].states = []
+  p.url = url; p.selectedTabs = [{ name: '数据工程师', elementId: p.items[2].elementId }]
   assertPositionEvidence(p, job, evidence)
 })
 
@@ -543,7 +546,7 @@ test('automatic identity/position evidence still rejects unrelated name and wron
   for (const action of [{action:'greet',ref:'hello',name:'另一人',position:{ref:'job'},reason:'联系'},
     {action:'greet',ref:'hello',name:'林先生',position:{ref:'job'},reason:'联系'}]) {
     await greetingFixture(async({execute,job,calls})=>{await execute();assert.equal(job.status,'failed');assert.equal(sends(calls).length,0)},
-      {page:i=>{const p=page('林先生',`s${i}`);p.items[2].elementId='wrong-job-456';return p},actions:[action,action,action]})
+      {page:i=>{const p=page('林先生',`s${i}`);p.url += '?jobId=456';return p},actions:[action,action,action]})
   }
 })
 
@@ -603,6 +606,17 @@ test('upload channels come from enabled company settings plus the always-availab
 
 test('host model route is captured and missing services fail without rule fallback', () => {
   assert.throws(() => hostPagePlanner({ get: () => undefined }, navigationActionSpec, 'system', 'test')(), /默认模型/)
+})
+
+test('page planners reject a removed provider before requesting any model output', () => {
+  let calls = 0
+  const llm = { listProviders: () => [{ id: 'deepseek-official' }], stream() { calls++; throw new Error('must not call') } }
+  const ctx = { get: key => key === 'llm' ? llm : key === 'agentDefaultModel'
+    ? { currentSelection: () => ({ provider: 'xinling-workbuddy', model: 'glm-5.3-flash' }) } : undefined }
+  for (const feature of ['test', 'greeting', 'resume']) {
+    assert.throws(() => hostPagePlanner(ctx, navigationActionSpec, 'system', feature)(), /HOST_MODEL_PROVIDER_UNAVAILABLE.*模型设置/)
+  }
+  assert.equal(calls, 0)
 })
 
 function modelContext(outputs) {

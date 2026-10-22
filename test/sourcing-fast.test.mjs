@@ -3,8 +3,9 @@ import { test } from 'node:test'
 import { evaluateSources, numberEvidence } from '../dist/lib/sourcing/evaluator.js'
 import { runSourcingWorkflow } from '../dist/lib/sourcing/fast-runner.js'
 import { SourcingHandoff } from '../dist/lib/sourcing/browser.js'
+import { recruitmentMatchingSkill } from '../dist/lib/browser-skill.js'
 
-const requirements = { keyword: 'Java', criteria: [{ id: 'java', label: 'Java', quote: 'Java开发', weight: 100, must: true }] }
+const requirements = { keyword: 'Java', listCriteria: [{ field: 'education', requirement: '本科', quote: '本科' }], criteria: [{ id: 'java', label: 'Java', quote: 'Java开发', weight: 100, must: true }] }
 const judgement = (source, state = 'match') => ({ sourceId: source.sourceId, fields: [], assessments: [{ criterionId: 'java', state, evidenceId: state === 'unknown' ? null : 0, reason: '原文证据' }] })
 const done = { status: 'completed', message: 'done', turns: 1, modelMs: 10, toolMs: 1 }
 const signal = () => new AbortController().signal
@@ -22,7 +23,7 @@ test('assessment conversation is isolated and rejects cross-person evidence, dup
     assert.deepEqual(options.tools.map(t => t.name), ['sourcing_submit_assessments'])
     assert.equal(options.initialToolResults, undefined)
     assert.deepEqual(options.goal.candidates.map(c => c.evidence.map(e => e.text).join('')), sources.map(s => s.text))
-    const submit = options.tools[0].execute
+    const submit = args => options.tools[0].execute({ candidates: args.candidates.map(({ listAssessments, ...row }) => row) })
     const unknown = judgement(sources[1], 'unknown')
     unknown.assessments[0].evidenceId = 99 // harmless surplus metadata is discarded
     const valid = { candidates: [judgement(sources[0]), unknown] }
@@ -48,9 +49,35 @@ test('incomplete assessment never becomes an accepted result and cancellation is
   await assert.rejects(evaluateSources(agent, requirements, sources, controller.signal), /cancelled/)
 })
 
+test('recovery reuses only exactly equal task-local assessment inputs, even when source refs/IDs change', async () => {
+  let calls = 0
+  const agent = async opts => {
+    calls++
+    await opts.tools[0].execute({ candidates: opts.goal.candidates.map(source => {
+      const row = judgement(source)
+      if (opts.goal.mode === 'preview') { delete row.fields; delete row.assessments; row.listAssessments = [{ field: 'education', state: 'match', evidenceId: 0, reason: '原文证据' }] }
+      return row
+    }) }, opts.signal)
+    return done
+  }
+  const source = { sourceId: 'old-ref', name: '陈先生', text: 'Java开发' }
+  const first = await evaluateSources(agent, requirements, [source], signal(), undefined, 'preview')
+  first[0].listAssessments[0].reason = 'caller mutation'
+  const recovered = await evaluateSources(agent, requirements, [{ ...source, sourceId: 'new-ref' }], signal(), undefined, 'preview')
+  assert.equal(calls, 1)
+  assert.equal(recovered[0].sourceId, 'new-ref')
+  assert.notEqual(recovered[0].listAssessments[0].reason, 'caller mutation')
+  await evaluateSources(agent, requirements, [{ ...source, text: 'Java开发与架构设计' }], signal(), undefined, 'preview')
+  await evaluateSources(agent, requirements, [source], signal(), undefined, 'detail')
+  assert.equal(calls, 3, 'changed text and detail mode require their own assessments')
+  const aborted = new AbortController(); aborted.abort()
+  await assert.rejects(evaluateSources(agent, requirements, [source], aborted.signal, undefined, 'preview'))
+})
+
 function fixture(overrides = {}) {
   let revision = 0, pending, current, recorded = 0, needsGreeting = false, fallbackCalls = 0, assessmentCalls = 0, searchReady = overrides.searchReady ?? true
-  const events = [], assessedBatches = []
+  const events = [], assessedBatches = [], selections = []
+  let cardReads = 0
   const cards = [1, 2, 3].map(i => ({ sourceId: String(i), name: `陈${i}先生`, text: 'Java开发', ref: `name${i}`, evidenceRefs: [`card${i}`] }))
   const job = { requirements, candidates: [], searchFilters: {}, jobName: 'Java', limit: 2 }
   const page = () => ({ tabId: 1, snapshotId: `s${revision}`, items: [] })
@@ -58,7 +85,7 @@ function fixture(overrides = {}) {
   const driver = {
     recognizes: async () => true,
     prepareSearch: async () => ({ tabId: 1, snapshotId: 's0', ref: 'position', mode: 'position', filters: [] }),
-    cards: async () => { revision++; return cards.map(c => ({ ...c, ref: `${c.ref}-s${revision}` })) },
+    cards: async () => { revision++; cardReads++; return cards.map(c => ({ ...c, text: overrides.cardText?.(cardReads) ?? c.text, ref: `${c.ref}-s${revision}` })) },
     open: async card => { events.push('open:' + card.sourceId); current = card; return locator() },
     resume: async () => { revision++; return locator() },
     returnToList: async () => { events.push('return') },
@@ -72,6 +99,8 @@ function fixture(overrides = {}) {
     sourcing_select_candidate: async args => {
       assert.equal(args.snapshotId, page().snapshotId)
       assert.match(args.ref, new RegExp(`-s${revision}$`), 'old model refs are never reused')
+      selections.push(structuredClone(args))
+      if (overrides.rejected?.includes(args.name)) return { qualified: false }
       pending = args.name
       events.push('select:' + args.name)
       return { qualified: true }
@@ -87,27 +116,76 @@ function fixture(overrides = {}) {
     ...overrides.hooks,
   }
   const tools = Object.entries(hooks).map(([name, execute]) => ({ name, execute }))
-  const ops = { tools, recoveryTools: () => tools, preview: async card => ({ text: card.text, duplicate: false }), remaining: () => 2 - recorded, complete: () => recorded >= 2 && !needsGreeting,
+  const ops = { tools, recoveryTools: () => tools, preview: async card => ({ text: card.text, duplicate: false }), remaining: () => (overrides.limit ?? 2) - recorded, complete: () => recorded >= (overrides.limit ?? 2) && !needsGreeting,
+    progress: async message => { events.push('progress:' + message) },
     state: () => ({ searchReady, pending, needsGreeting }),
     captured: () => pending ? { name: pending, text: 'Java开发', scope: 'online' } : undefined }
   const agent = async options => {
-    if (options.tools[0]?.name !== 'sourcing_submit_assessments') { fallbackCalls++; events.push('fallback'); return overrides.fallback?.(options, ops) ?? done }
+    if (options.tools.length === 1 && options.tools[0].name === 'sourcing_define_requirements') {
+      overrides.onDefine?.(options)
+      await options.tools[0].execute(requirements, options.signal)
+      return done
+    }
+    if (options.tools[0]?.name !== 'sourcing_submit_assessments') {
+      const collect = options.tools.find(tool => tool.name === 'sourcing_collect')
+      try {
+        await collect.execute({}, options.signal)
+        return done
+      } catch (error) {
+        if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error))) throw error
+        const recovery = await collect.recover(error, {}, options.signal)
+        fallbackCalls++; events.push('fallback')
+        return overrides.fallback?.({ ...options, goal: { ...options.goal, ...recovery } }, ops) ?? { ...done, status: 'stopped' }
+      }
+    }
     assessmentCalls++
     assessedBatches.push(options.goal.candidates.map(s => s.sourceId))
-    await options.tools[0].execute({ candidates: options.goal.candidates.map(s => { const row = judgement(s); if (options.goal.mode === 'preview') delete row.fields; return row }) }, options.signal)
+    await options.tools[0].execute({ candidates: options.goal.candidates.map(s => { const row = judgement(s); if (options.goal.mode === 'preview') { delete row.fields; delete row.assessments; row.listAssessments = [{ field: 'education', state: 'match', evidenceId: 0, reason: '原文证据' }] }; return row }) }, options.signal)
     return done
   }
   return { run: () => runSourcingWorkflow({ createSourcingDriver: () => driver }, { broker, job, signal: signal() }, ops, agent,
-    { system: 'fallback', goal: {}, tools, signal: signal() }), events, assessedBatches, counts: () => ({ recorded, assessmentCalls, fallbackCalls }) }
+    { system: 'fallback', goal: {}, tools, signal: signal() }), job, events, assessedBatches, selections, counts: () => ({ recorded, assessmentCalls, fallbackCalls }) }
 }
+
+test('fixed-flow requirement extraction loads the bundled skill independently of the main conversation', async () => {
+  let calls = 0
+  const f = fixture({ onDefine: opts => {
+    calls++
+    assert.ok(opts.system.includes(recruitmentMatchingSkill().content))
+    assert.deepEqual(opts.goal.supplementParts, ['优先上一段任职超过2年'])
+    assert.equal(opts.goal.position.description, 'Java开发')
+  }, hooks: { sourcing_define_requirements: async input => { f.job.requirements = input } } })
+  f.job.requirements = undefined
+  f.job.position = { name: 'Java开发', description: 'Java开发' }
+  f.job.supplement = '优先上一段任职超过2年'
+  assert.equal((await f.run()).status, 'completed')
+  assert.equal(calls, 1)
+})
 
 test('one batch preview and one assessment per accepted candidate, with fresh refs and serial greeting', async () => {
   const f = fixture({ autoGreet: true })
   const result = await f.run()
   assert.equal(result.status, 'completed')
   assert.deepEqual(f.counts(), { recorded: 2, assessmentCalls: 3, fallbackCalls: 0 })
-  assert.equal(f.assessedBatches[0].length, 2)
+  assert.equal(f.assessedBatches[0].length, 3)
   assert.ok(f.events.indexOf('greet:1') < f.events.indexOf('select:陈2先生'))
+  assert.ok(f.events.some(event => event.includes('位候选人进行列表初筛')))
+})
+
+test('returning to a different visible window leaves unselected assessed cards for later instead of handing off', async () => {
+  let returned = false
+  const card = i => ({ sourceId: String(i), name: `陈${i}先生`, text: 'Java开发', ref: `name${i}-s0`, evidenceRefs: [`card${i}`] })
+  const f = fixture({ driver: {
+    cards: async () => returned ? [card(3)] : [card(1), card(2)],
+    resume: async () => ({ tabId: 1, snapshotId: 's0', identityRef: 'resume', resumeRefs: ['resume'] }),
+    returnToList: async () => { returned = true },
+  } })
+  assert.equal((await f.run()).status, 'completed')
+  assert.equal(f.counts().recorded, 2)
+  assert.equal(f.counts().fallbackCalls, 0)
+  assert.ok(f.events.includes('select:陈1先生'))
+  assert.ok(f.events.includes('select:陈3先生'))
+  assert.equal(f.events.includes('select:陈2先生'), false)
 })
 
 test('unknown browser input and storage errors stop without handing off or replaying', async () => {
@@ -154,7 +232,7 @@ test('candidate condition judgements preserve source-bound evidence and fill omi
     await options.tools[0].execute({ candidates: [candidate] })
     return done
   }
-  const result = await evaluateSources(runner, requirements, sources, signal(), undefined, 'preview', { city: '武汉', education: '本科' })
+  const result = await evaluateSources(runner, requirements, sources, signal(), undefined, 'detail', { city: '武汉', education: '本科' })
   assert.equal(calls, 1)
   assert.equal(result[0].filterAssessments.length, 2)
   assert.equal(result[0].filterAssessments[0].quote, sources[0].text)
@@ -166,18 +244,20 @@ test('omitted condition decisions do not force a second assessment turn or count
     await options.tools[0].execute({ candidates: [judgement(sources[0])] })
     assert.equal(options.isComplete(), true)
     return done
-  }, requirements, sources, signal(), undefined, 'preview', { city: '武汉', education: '本科' })
+  }, requirements, sources, signal(), undefined, 'detail', { city: '武汉', education: '本科' })
   assert.deepEqual(result[0].filterAssessments.map(row => [row.field, row.state, row.quote]), [['city', 'unknown', ''], ['education', 'unknown', '']])
 })
 
-test('AI preparing recovery returns to the fast driver once without replaying candidate or greeting actions', async () => {
+test('the same agent explicitly resumes collection after preparing the page, without replaying candidate or greeting actions', async () => {
   let preparations = 0
   const f = fixture({ searchReady: false, driver: { prepareSearch: async () => {
     if (++preparations === 1) throw new SourcingHandoff('unknown_startup_dialog')
     return { tabId: 1, snapshotId: 's0', ref: 'position', mode: 'position', filters: [] }
   } }, fallback: async options => {
     await options.tools.find(tool => tool.name === 'sourcing_confirm_search').execute({})
-    assert.equal(options.isComplete(), true, 'ready navigation returns ownership to the fast driver')
+    assert.equal(options.isComplete(), false, 'preparing a page is not completion of the candidate quota')
+    await options.tools.find(tool => tool.name === 'sourcing_collect').execute({}, options.signal)
+    assert.equal(options.isComplete(), true)
     return done
   } })
   const result = await f.run()
@@ -196,4 +276,45 @@ test('an unknown fallback outcome never resumes the fast driver even after prepa
   await assert.rejects(f.run(), /OUTCOME_UNKNOWN/)
   assert.equal(preparations, 1)
   assert.equal(f.counts().assessmentCalls, 0)
+})
+
+
+test('the final vacancy still screens three visible cards together and never saves over quota', async () => {
+  const f = fixture({ limit: 1, rejected: ['陈1先生', '陈2先生'] })
+  assert.equal((await f.run()).status, 'completed')
+  assert.deepEqual(f.assessedBatches[0], ['1', '2', '3'])
+  assert.equal(f.counts().assessmentCalls, 2, 'one batch screening plus the accepted resume')
+  assert.equal(f.counts().recorded, 1)
+  assert.equal(f.counts().fallbackCalls, 0)
+  assert.deepEqual(f.events.filter(event => event.startsWith('open:')), ['open:3'])
+})
+
+test('changed card evidence is reassessed against fresh text without a navigation handoff or stale quotes', async () => {
+  for (const updated of ['Java开发 本周活跃', 'Java开发 学历：硕士']) {
+    const f = fixture({ limit: 1, cardText: reads => reads === 1 ? 'Java开发' : updated })
+    assert.equal((await f.run()).status, 'completed')
+    assert.equal(f.counts().fallbackCalls, 0)
+    assert.equal(f.counts().assessmentCalls, 3, 'batch, changed source, detail')
+    assert.equal(f.selections[0].listAssessments[0].quote, updated)
+    assert.equal(f.counts().recorded, 1)
+  }
+})
+
+test('continuously changing evidence has bounded reassessment and never selects with stale evidence', async () => {
+  const f = fixture({ cardText: reads => `Java开发 变动${reads}` })
+  assert.equal((await f.run()).status, 'stopped')
+  assert.equal(f.counts().assessmentCalls, 3)
+  assert.equal(f.counts().fallbackCalls, 1)
+  assert.deepEqual(f.selections, [])
+  assert.equal(f.counts().recorded, 0)
+})
+
+
+test('navigation budget reports the last fixed-route failure instead of hiding it behind a generic turn limit', async () => {
+  const f = fixture({ driver: { open: async () => { throw new SourcingHandoff('candidate_detail_unknown') } },
+    fallback: async () => ({ ...done, status: 'budget', message: 'BROWSER_AGENT_TURN_BUDGET: 已达到本次推理轮数上限' }) })
+  const result = await f.run()
+  assert.equal(result.status, 'budget')
+  assert.match(result.message, /BROWSER_AGENT_TURN_BUDGET.*最近固定流程问题：candidate_detail_unknown/)
+  assert.equal(f.counts().recorded, 0)
 })

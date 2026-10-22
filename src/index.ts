@@ -12,7 +12,7 @@ import { readJobOptions, readPlatformJobs } from './lib/job-options.js'
 import { RecruitEngine, captureSpec, clean, ingestSpec, resultSpec, scanSpec, REQUIRED_OPERATIONS, CHANNEL_TYPES } from './lib/recruit-engine.js'
 import { contextSchemas, isDirectContext, readBusinessContext } from './lib/business-context.js'
 import { BrowserCallGuard } from './lib/browser-call-guard.js'
-import { browserSkill } from './lib/browser-skill.js'
+import { browserSkill, recruitmentMatchingSkill } from './lib/browser-skill.js'
 import { objectInput, readObjectInput } from './lib/object-input.js'
 import { ResumeImport, resumeStartSpec } from './lib/resume-import.js'
 import { greetingStartSpec } from './lib/greeting-policy.js'
@@ -106,6 +106,7 @@ export function apply(ctx: Context, config: Config) {
     })
   }
   ctx.skills.register(browserSkill())
+  ctx.skills.register(recruitmentMatchingSkill())
   /** 所有工具注册都经过调用记录，右侧「招聘」面板据此显示最近插件调用。 */
   const registerTool = (definition: any) => ctx.tools.register(journaledTool(definition))
   // 未显式配置时自动探测网关入口：使用发布包内的网关，不依赖开发机源码。
@@ -169,6 +170,7 @@ export function apply(ctx: Context, config: Config) {
     interpolate: false,
     text: `
 本插件内置 xinzhao-browser-control 技能。用户要求打开猎聘/BOSS、查看收到的简历或操作现有 Chrome 时，优先加载该技能并使用薪招；纯文字建议无需启动浏览器，用户明确指定其他工具时遵循其选择。
+本插件内置 recruitment-matching 技能，处理职位需求匹配和候选人筛选时可加载；人才寻聘执行器会在要求提炼和独立评估中自动加载同一规则。补充偏好独立加分，重要信息不足保留待核实，不计入达标人数或自动招呼。
 用户要求按职位寻找人才或分析匹配度时，使用 talent_sourcing 任务：先查真实职位，选定 jobId，按主系统职位说明和可选补充寻聘；platforms 支持 liepin/boss，limit是每个平台独立的目标人数（两平台各5人，合计10人），按平台顺序完成，不分摊；执行器先选平台关联职位，再设置城市/经验/学历筛选，核验后逐人评估，受阻停止并保留结果。minimumScore可设0至100的整数，默认60；autoGreet默认false，只有用户明确要求自动打招呼时才传true，达标后点击默认招呼，不入库。
 寻聘的 platforms 必须从所选真实职位返回的 jobs[].platforms 中选择，只展示当前职位已对接的平台，不能根据历史任务或已登录账号推断对接。无可用平台时说明需在主系统同步职位，不能启动未对接渠道。
 用户要求批量打招呼或已收简历入库时，优先 ai_recruit_task_options 读取必要选项，再用 ai_recruit_task_start 提交结构化任务；它与工作台共用执行器，右侧招聘进度面板展示结果。不要在外层会话逐人调用浏览器工具，也不要重复启动或循环轮询；告知任务已启动即可。猎聘搜索人才用 mode=search 和 search 条件，不能用推荐页代替搜索。只点击未沟通入口，继续沟通不可重发。打招呼按点击回执完成，不代表送达；入库仍以最终保存成功为准。人数、目标职位或入库参数不足时先问用户，不猜选项和 ID。
@@ -236,7 +238,7 @@ unknown 或 pending 都不是成功：出现 unknown 立即停止，先 result �
       : { ...await workbench.resumeOptions({}, execution.signal), schema: taskInputSchema(resumeStartSpec, 'resume_import') }),
   }))
   registerTool(defineTool({
-    name: 'ai_recruit_task_start', description: '启动与工作台相同的后台招聘任务。request按help.taskSchemas，省略id。人才寻聘kind=talent_sourcing，需要jobId、platforms、limit、confirmed=true，可选supplement、minimumScore（0至100的整数，默认60）、autoGreet（默认false）；先按列表证据筛掉低于minimumScore的人选再读取简历；用户明确要求自动打招呼时autoGreet=true，否则不发消息。不自动入库。仅在用户要求执行对应任务时使用。started不是任务完成，不要逐人调用或重复启动。',
+    name: 'ai_recruit_task_start', description: '启动与工作台相同的后台招聘任务。request按help.taskSchemas，省略id。人才寻聘kind=talent_sourcing，需要jobId、platforms、limit、confirmed=true，可选supplement、minimumScore（0至100的整数，默认60）、autoGreet（默认false）；列表初筛仅核验JD或补充要求明确提到的年龄、学历、工作经验年限、期望工作城市、就职公司和薪资，必须全部完全符合才读取详情；minimumScore仅用于详情评估后的保存与招呼；用户明确要求自动打招呼时autoGreet=true，否则不发消息。不自动入库。仅在用户要求执行对应任务时使用。started不是任务完成，不要逐人调用或重复启动。',
     parameters: { request: { ...objectInput, required: true } }, output,
     execute: (args, execution) => run(execution, async () => {
       const job = await workbench.startSession(readObjectInput(args.request, 'request', 'RECRUITMENT_ARGUMENT_INVALID'), sessionOf(execution), String(execution.callId))

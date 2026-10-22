@@ -1,4 +1,4 @@
-import { readCapturedFile } from './file-transfer.js'
+import { readCapturedFile, type CapturedFile } from './file-transfer.js'
 // 招聘助手编排：搜索/筛选 → 采集 → 入库。
 //
 // 分工（与薪招的既有契约对齐）：
@@ -128,7 +128,11 @@ export interface EngineDeps {
   uploadOrigins?: string[]
   logger?: DeveloperLog
 }
-interface IngestInput { taskId: string; items: IngestItem[]; retryUploadUrlOnce?: boolean; onProgress?: (state: IngestRecord) => Promise<void> }
+interface IngestInput {
+  taskId: string; items: IngestItem[]; retryUploadUrlOnce?: boolean; onProgress?: (state: IngestRecord) => Promise<void>
+  /** Host-owned verified files; never accepted by the public tool schema. */
+  files?: ReadonlyMap<string, CapturedFile>
+}
 
 export class RecruitEngine {
   constructor(private readonly deps: EngineDeps) {}
@@ -312,7 +316,8 @@ export class RecruitEngine {
           const upload = new URL(urlResult.data)
           upload.searchParams.set('is_permanent', 'true')
           const uploadUrl = upload.href
-          const read = () => readCapturedFile(item.captureId, args => this.gateway('artifact_read', args), this.deps.signal)
+          const read = () => input.files?.has(item.captureId) ? Promise.resolve({ ...input.files.get(item.captureId)! })
+            : readCapturedFile(item.captureId, args => this.gateway('artifact_read', args), this.deps.signal)
           const file = this.deps.logger ? await this.deps.logger.trace('file.read_capture', { captureKey: logKey(item.captureId) }, read,
             captured => ({ bytes: captured.blob.size })) : await read()
           if (item.name) file.fileName = item.name

@@ -30,13 +30,13 @@ test('communication filter joins exact platform profile identities without guess
   const records = communicationIndex([greeting({ stage:'succeeded',clickedAt:'now' })])
   assert.equal(candidateCommunication(candidate, records),'recorded')
   assert.equal(candidateCommunication({...candidate,platform:'boss'},records),'none')
-  assert.equal(candidateCommunication({...candidate,profileUrl:''},records),'unknown')
+  assert.equal(candidateCommunication({...candidate,profileUrl:''},records),'none')
   assert.equal(candidateCommunication({...candidate,profileUrl:url+'-other'},records),'none')
   assert.equal(candidateCommunication(candidate,communicationIndex([greeting({identityKind:'text',stage:'succeeded',clickedAt:'now'})])),'none')
 })
-test('uncertain attempts remain uncertain and a dispatched click is represented as a record, not delivery proof', () => {
-  assert.equal(candidateCommunication(candidate,communicationIndex([greeting({stage:'unknown'})])),'uncertain')
-  assert.equal(candidateCommunication(candidate,communicationIndex([greeting({stage:'failed',attemptedAt:'now'})])),'uncertain')
+test('business communication has two states while unsuccessful execution attempts remain protected in raw history', () => {
+  assert.equal(candidateCommunication(candidate,communicationIndex([greeting({stage:'unknown'})])),'none')
+  assert.equal(candidateCommunication(candidate,communicationIndex([greeting({stage:'failed',attemptedAt:'now'})])),'none')
   assert.equal(candidateCommunication(candidate,communicationIndex([greeting({stage:'failed'})])),'none')
   assert.equal(candidateCommunication(candidate,communicationIndex([greeting({stage:'succeeded',clickedAt:'past'}),greeting({stage:'unknown'})])),'recorded')
 })

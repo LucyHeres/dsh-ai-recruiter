@@ -13,6 +13,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import { PLATFORMS, TASK_FEATURES, EXTENSION_INSTALL_URL, taskFeature, type ExtensionInstallation, type TaskKind, type WorkbenchState, type WorkbenchJob, type TaskResultStage, type DeveloperLogs } from '../shared/workbench.js'
 import styles from './style.css'
 import { taskResultRows } from '../shared/greeting-results.js'
+import { greetingLabel, greetingDetail, greetingNotice, hasGreeted } from '../shared/communication.js'
 import { sourcingTotalTarget } from '../shared/sourcing-score.js'
 import { registerSessionPanel } from './session-panel.js'
 import { TaskRecords } from './features/task-records.js'
@@ -104,7 +105,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
     ?? featureJobs.find(job => job.id === state?.activeJobId)
     ?? featureJobs[0]
   const results = current ? taskResultRows(current) : []
-  const success = results.filter(item => item.stage === 'succeeded').length
+  const success = results.filter(item => current?.kind === 'greeting' ? hasGreeted(item) : item.stage === 'succeeded').length
   const locked = !state || !!busy || !!state?.activeJobId || !!connection?.busy || !!connectionError || !!connection?.activeWorkflow
   const occupied = !!state?.activeJobId || !!connection?.busy || !!connection?.activeWorkflow
   const ready = !!connection?.ready && (connection.available || connection.requiresBegin) && !occupied && !connectionError
@@ -227,9 +228,10 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
       {position ? <SourcingPanel key={position.id} positionId={position.id} rpc={rpc} state={state} locked={locked} pending={needsReconcile} busy={busy} blockingReason={blockingReason} onStart={settings => startTask(settings, 'talent_sourcing')} onReconcile={reconcileTask} selectedTaskId={selected.talent_sourcing} selectedRecord={inspectedTask?.kind === 'talent_sourcing' ? inspectedTask : undefined} /> : <PositionHome rpc={rpc} onRecruit={job => { setPosition(job); setInspectedTask(undefined); setSelectedKind('talent_sourcing') }} />}
     </div>
     {resumeOpen && position && <SidePanel title="简历入库" onClose={() => setResumeOpen(false)}><div className="air-resume-panel"><div className="air-resume-context"><b>{position.name}</b><p>将平台已收到的简历附件，导入当前职位。</p></div><ResumeForm positionId={position.id} loadJobOptions={() => rpc('greetingJobOptions', {})} loadResumeOptions={() => rpc('resumeOptions', {})} checkLogin={(platform, open) => rpc('platformLogin', { platform, open })} state={state} locked={locked} busy={busy} pending={needsReconcile} blockingReason={blockingReason} onStart={settings => startTask(settings, 'resume_import')} /></div></SidePanel>}
-    {activityOpen && <SidePanel title={current?.kind === 'resume_import' ? '简历入库进度' : '任务详情'} onClose={() => setActivityOpen(false)} className="air-task-activity-panel">        <section className="air-activity" aria-labelledby="air-activity-title">
+    {activityOpen && <SidePanel title={current?.kind === 'resume_import' ? '简历入库进度' : '任务详情'} onClose={() => setActivityOpen(false)} className="air-task-activity-panel">
+        <section className="air-activity" aria-labelledby="air-activity-title">
           <div className="air-section-heading air-activity-heading"><div><h2 id="air-activity-title">执行进度</h2>{current && <p className="air-task-meta">{resultFeature.label} · {PLATFORMS[current.platform].label}<time dateTime={current.createdAt}>{formatTime(current.createdAt)}</time></p>}</div>
-            {current && <div className="air-task-actions"><JobStatus status={current.status} />{isActiveJob && <button type="button" className="air-button air-button-outline air-button-small" disabled={!!busy} onClick={() => void act('停止任务', async () => { await rpc('stop', { id: current.id }) })}><StopIcon aria-hidden="true" />{busy === '停止任务' ? '停止中…' : '停止任务'}</button>}</div>}
+            {current && <div className="air-task-actions"><JobStatus status={current.status === 'unknown' && current.kind === 'greeting' ? 'stopped' : current.status} />{isActiveJob && <button type="button" className="air-button air-button-outline air-button-small" disabled={!!busy} onClick={() => void act('停止任务', async () => { await rpc('stop', { id: current.id }) })}><StopIcon aria-hidden="true" />{busy === '停止任务' ? '停止中…' : '停止任务'}</button>}</div>}
           </div>
           {!state && connectionError ? <div className="air-result-empty"><p>任务记录暂时无法读取。</p></div> : !state ? <ActivitySkeleton /> : current ? <>
             <div className={`air-progress-overview ${current.events?.length ? 'has-events' : ''}`}>
@@ -237,16 +239,16 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
                 <div className="air-summary">
                   <div className="air-summary-primary"><span className="air-summary-label">{current.kind === 'greeting' && results.some(item => item.stage === 'succeeded' && !item.confirmedAt && !item.clickedAt) ? '已触发沟通（旧记录）' : resultFeature.progressLabel}</span><div className="air-total"><strong>{success}</strong><span>/ {sourcingTotalTarget(current)}<small>{resultFeature.unit}</small></span></div></div>
                 </div>
-                {current.kind === 'resume_import' && <p className="air-progress-context">计划最多 {current.limit} 份 · 已处理 {current.results.length} 份 · 处理失败 {current.results.filter(item => item.stage === 'failed').length} 份</p>}
+                {current.kind === 'resume_import' && <p className="air-progress-context"><span>计划最多 <b>{current.limit}</b> 份</span><span>已处理 <b>{current.results.length}</b> 份</span><span>处理失败 <b>{current.results.filter(item => item.stage === 'failed').length}</b> 份</span></p>}
                 <progress className="air-progress-track" max={sourcingTotalTarget(current)} value={success} aria-label={resultFeature.progressLabel} />
                 {isActiveJob && current.nextActionAt && <p className="air-countdown" aria-live="off">距下一步 {Math.max(0, Math.ceil((new Date(current.nextActionAt).getTime() - now) / 1000))} 秒</p>}
               </div>
-              {!!current.events?.length && <ExecutionLog key={current.id} events={current.events} />}
+              {!!current.events?.length && <ExecutionLog key={current.id} events={current.kind === 'greeting' ? current.events.map(event => ({ ...event, message: greetingNotice(event.message) })) : current.events} />}
             </div>
             <div className="air-result-toolbar"><div className="air-result-heading">全部记录<span>{results.length}</span></div><span className="air-section-meta">{current.kind === 'greeting' ? '每位候选人的最终结果' : '按操作顺序'}</span></div>
-            {results.length ? <ul className="air-results" aria-label="候选人处理结果">{results.map((item, index) => {
-              const Icon = resultIcon[item.stage]
-              return <li className={`air-result is-${item.stage}`} key={`${item.key}-${index}`}><span className="air-result-symbol"><Icon aria-hidden="true" /></span><div className="air-result-body"><div className="air-result-title"><b>{item.name}</b><span className="air-result-state">{current.kind === 'greeting' && item.stage === 'succeeded' ? (item.confirmedAt ? '已确认' : item.clickedAt ? '已点击' : '已触发（旧记录）') : current.kind === 'resume_import' && item.stage === 'succeeded' ? '已入库' : current.kind === 'resume_import' && item.stage === 'sending' ? '处理中' : item.stage === 'skipped' && item.retryable ? '已取消' : resultNames[item.stage]}</span></div><p>{item.attemptedAt && <><time dateTime={item.attemptedAt}>{new Date(item.attemptedAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>{' · '}</>}{item.detail}</p></div></li>
+            {results.length ? <ul className="air-results" aria-label={current.kind === 'resume_import' ? '简历入库记录' : '候选人处理结果'}>{results.map((item, index) => {
+              const Icon = current.kind === 'resume_import' ? FileTextIcon : resultIcon[item.stage]
+              return <li className={`air-result is-${item.stage}`} key={`${item.key}-${index}`}><span className="air-result-symbol"><Icon aria-hidden="true" /></span><div className="air-result-body"><div className="air-result-title"><b title={item.name}>{item.name}</b><span className="air-result-state">{current.kind === 'greeting' ? greetingLabel(item) : current.kind === 'resume_import' && item.stage === 'succeeded' ? '已入库' : current.kind === 'resume_import' && item.stage === 'sending' ? '处理中' : item.stage === 'skipped' && item.retryable ? '已取消' : resultNames[item.stage]}</span></div><p>{item.attemptedAt && <><time dateTime={item.attemptedAt}>{new Date(item.attemptedAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>{' · '}</>}{current.kind === 'greeting' ? greetingDetail(item) : item.detail}</p></div></li>
             })}</ul> : <div className="air-result-empty">{needsResumeHelp ? <ExclamationTriangleIcon aria-hidden="true" /> : <CheckCircledIcon aria-hidden="true" />}<p>{isActiveJob ? '任务正在执行，结果会显示在这里。' : needsResumeHelp ? '尚未处理任何简历，可在最近任务中复制操作日志反馈。' : '本次任务没有处理记录。'}</p></div>}
           </> : <div className="air-empty"><div className="air-empty-symbol"><ChatBubbleIcon aria-hidden="true" /></div><h3>开始你的第一个{feature.label}任务</h3><p>选择功能并设置参数，点击开始。<br />执行步骤与处理结果都会显示在这里。</p><div className="air-empty-guide"><span>选择功能</span><ChevronRightIcon aria-hidden="true" /><span>自动执行</span><ChevronRightIcon aria-hidden="true" /><span>实时查看结果</span></div></div>}
           <footer className="air-activity-footer"><span><DesktopIcon aria-hidden="true" />记录保存在本机</span><span>结果不确定时自动停止</span></footer>

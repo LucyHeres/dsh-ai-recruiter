@@ -1,67 +1,161 @@
-import type { BrowserAgentOptions, BrowserAgentResult, BrowserAgentSeed } from '../browser-agent.js'
+import type { BrowserAgentOptions, BrowserAgentResult, BrowserAgentTool, BrowserAgentSeed } from '../browser-agent.js'
 import type { BrowserAgentRunner } from '../host-browser-agent.js'
 import type { RecruitmentPlatform } from '../platforms/types.js'
-import type { SourcingCard, SourcingDriverContext, SourcingOperations } from './types.js'
+import type { ResumeLocator, SourcingCard, SourcingDriverContext, SourcingOperations } from './types.js'
 import { evaluateSources, judgementAnalysis } from './evaluator.js'
 import { hash } from '../store.js'
 import { recoverablePageError } from '../page-actions.js'
 import { SourcingHandoff } from './browser.js'
 import { browserFailureCode } from '../browser-errors.js'
 import { sourcingMode } from './source.js'
+import { LIST_REQUIREMENTS_PROMPT } from './list-screening.js'
+import { matchingInstructions, requirementsGoal } from './matching-skill.js'
 
-/** A bounded code-driven workflow. The platform driver knows page semantics;
- * the existing session hooks own policy/state; the evaluator has no browser.
- * A handoff keeps the very same pending candidate and dispatch ledger. */
+/** Platform code runs first. Navigation inference starts only at an unexpected
+ * state and yields back to the same driver after recovery. Assessment models
+ * receive immutable business evidence, never browser tools. */
 export async function runSourcingWorkflow(platform: RecruitmentPlatform, context: SourcingDriverContext,
-  operations: SourcingOperations, agent: BrowserAgentRunner, fallback: BrowserAgentOptions, allowResume = true): Promise<BrowserAgentResult> {
+  operations: SourcingOperations, agent: BrowserAgentRunner, fallback: BrowserAgentOptions): Promise<BrowserAgentResult> {
   const started = Date.now(), budget = fallback.maxDurationMs ?? 20 * 60 * 1000
   const deadline = new AbortController(), timer = setTimeout(() => deadline.abort(new Error('SOURCING_DURATION_BUDGET')), budget)
   const signal = AbortSignal.any([context.signal, deadline.signal])
-  const seeds: BrowserAgentSeed[] = []
   const candidateFilters = sourcingMode(context.job) === 'recommend' ? context.job.searchFilters : undefined
-  let modelMs = 0, turns = 0, driverRecognized = false
+  let modelMs = 0, turns = 0
+  let failedState: string | undefined
+  let lastHandoff: string | undefined
+  const seen = new Set<string>()
+  const driver = platform.createSourcingDriver?.({ ...context, signal })
+  let prepared = false
   const scopedAgent: BrowserAgentRunner = async options => {
-    const result = await agent({ ...options, signal, maxDurationMs: Math.min(options.maxDurationMs ?? budget, Math.max(1, budget - (Date.now() - started))) })
+    const result = await agent({ ...options, signal: AbortSignal.any([signal, options.signal]),
+      maxDurationMs: Math.min(options.maxDurationMs ?? budget, Math.max(1, budget - (Date.now() - started))) })
     modelMs += result.modelMs; turns += result.turns
+    if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(result.message)) throw new Error(result.message)
     return result
   }
   const log = (event: string, fields: Record<string, unknown>) => {
     try { fallback.logger?.write('info', `sourcing.fast_${event}`, fields) } catch {}
   }
-  const execute = async (name: string, args: Record<string, unknown>) => {
-    signal.throwIfAborted()
+  const finish = (result: BrowserAgentResult) => {
+    log('execution_finished', { durationMs: Date.now() - started, navigationTurns: result.turns - turns,
+      assessmentTurns: turns, modelMs: result.modelMs, toolMs: result.toolMs, completed: operations.complete() })
+    return result
+  }
+  const executeOperation = async (name: string, args: Record<string, unknown>, executionSignal: AbortSignal) => {
+    executionSignal.throwIfAborted()
     const tool = operations.tools.find(t => t.name === name)
     if (!tool) throw new Error('SOURCING_OPERATION_MISSING')
-    const value = await tool.execute(args, signal)
-    // Only the latest host state is needed for recovery. Do not re-inject old
-    // snapshots, resume text or every successful navigation into AI history.
-    seeds.splice(0, seeds.length, { name, args: {}, value })
+    const value = await tool.execute(args, executionSignal)
     return value as any
   }
-  try {
-    if (platform.createSourcingDriver) {
-      const driver = platform.createSourcingDriver({ ...context, signal })
+  const stateKey = () => {
+    const page = context.broker.currentPage()
+    return hash({ state: operations.state(), document: page?.documentId, url: page?.url,
+      // Refreshing refs/online hints cannot restart a failed fixed route. A
+      // real input or a host milestone can; the driver still checks its result.
+      inputRevision: context.broker.inputRevision,
+      ...(context.broker.inputRevision === undefined ? { items: page?.items?.map((item: any) => [item.role, item.name, item.value, item.states]) } : {}) })
+  }
+  const recoverable = (error: unknown) => !/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error))
+    && (error instanceof SourcingHandoff || recoverablePageError(error)
+      || /^(?:SOURCING_|SEARCH_CONDITIONS_UNVERIFIED|SEMANTIC_DETAILS_UNAVAILABLE)/.test(error instanceof Error ? error.message : ''))
+  const collection: BrowserAgentTool = {
+    name: 'sourcing_collect',
+    description: '恢复到已知页面后继续平台固定流程。宿主已先执行过，并会在你处理异常后自动接回；无需逐个选择、滚动或读取已知列表。尚未改变页面时不要重复调用。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }, readOnly: false,
+    failureKey: () => 'platform-collection',
+    contextSnapshot: (args, value) => context.broker.contextSnapshot(args, value),
+    recover: async (_error, _args, toolSignal) => {
+      const page = context.broker.currentPage()
+      const hostState = operations.state()
+      let observation: unknown
+      if (page?.tabId) {
+        const snapshot = context.broker.tools.find(tool => tool.name === 'browser_snapshot')!
+        const supportsFormat = !!(snapshot.inputSchema?.properties as any)?.format
+        try {
+          observation = await snapshot.execute({ tabId: page.tabId,
+            ...(supportsFormat && (hostState.pending || hostState.needsGreeting) ? { format: 'dom' } : {}) }, toolSignal)
+        } catch (error) {
+          toolSignal.throwIfAborted()
+          observation = { error: browserFailureCode(error) ?? 'OBSERVATION_UNAVAILABLE' }
+        }
+      }
+      const captured = operations.captured()
+      return { hostState, requirements: context.job.requirements, observation, processedCandidateKeys: [...seen].slice(-80),
+        capturedResume: captured && { name: captured.name, characters: captured.text.length, scope: captured.scope },
+        next: hostState.pending
+          ? '候选人已完成列表初筛并处于待处理状态。hostState.selectedCandidate 是当前人选的稳定身份和列表依据；定位同一人的姓名入口打开详情，再读取、评估和保存。不要再次选择或替换候选人；确实无法定位时调用sourcing_skip_candidate后继续。'
+          : hostState.needsGreeting ? '当前人选已保存，先核对并完成同一人的招呼；不能重选、跳过或重发结果未知的动作。'
+          : '本轮已处理的候选标识在processedCandidateKeys中。只处理当前可见的新人；duplicate=true不需要再调用skip。当前屏都已处理时，滚动实际候选列表或准备好页面后调用sourcing_collect。不要反复选择旧人；不得重发结果未知的动作。' }
+    },
+    execute: async (args, executionSignal) => {
+      const signal = AbortSignal.any([context.signal, deadline.signal, executionSignal])
+      const execute = (name: string, input: Record<string, unknown>) => executeOperation(name, input, signal)
+      if (Object.keys(args).length) throw new Error('SOURCING_ARGUMENT_INVALID: sourcing_collect 不接受额外参数')
+      signal.throwIfAborted()
+      if (failedState === stateKey()) throw new SourcingHandoff('collection_state_unchanged')
+      if (!driver) throw new SourcingHandoff('platform_driver_missing')
       try {
         if (!await driver.recognizes()) throw new SourcingHandoff('page_not_recognized')
-        driverRecognized = true
-        if (!context.job.requirements) {
+        if (!context.job.requirements?.listCriteria) {
           let defined = false
           const define = operations.tools.find(t => t.name === 'sourcing_define_requirements')!
-          await scopedAgent({ system: '从职位原文提炼1至8个技能/职责/项目经历匹配维度，权重合计100；quote逐字引用职位要求，关键词出自职位名或要求。不得使用年龄、性别、婚育等维度。只调用 sourcing_define_requirements 一次。',
-            goal: { position: context.job.position, supplement: context.job.supplement }, signal, tools: [{ ...define, execute: async (args, s) => {
+          await scopedAgent({ system: matchingInstructions() + '\n当前阶段：提炼要求。quote逐字引用职位或补充原文，关键词出自职位名或要求。已有criteria时原样保留。' + LIST_REQUIREMENTS_PROMPT + '只调用 sourcing_define_requirements 一次。',
+            goal: requirementsGoal(context.job.position, context.job.supplement ?? '', context.job.requirements), signal, tools: [{ ...define, execute: async (args, s) => {
               const result = await define.execute(args, s); defined = true; return result
-            } }], maxTurns: 2, isComplete: () => defined, logger: fallback.logger })
+            } }], maxTurns: 2, modelPurpose: 'assessment', isComplete: () => defined, logger: fallback.logger })
           if (!defined) throw new SourcingHandoff('requirements_incomplete')
         }
-        await execute('sourcing_confirm_search', await driver.prepareSearch())
-        log('search_ready', { durationMs: Date.now() - started })
-        const seen = new Set<string>()
+        const returnToList = async () => {
+          if (operations.complete()) return
+          const returned = await driver.returnToList()
+          if (returned) await execute('sourcing_confirm_search', returned)
+        }
+        const finishSelected = async (name: string, candidateSource: string, locator: ResumeLocator) => {
+          await execute('sourcing_read_resume', locator)
+          const captured = operations.captured()
+          if (!captured?.text || captured.scope !== 'online') throw new SourcingHandoff('resume_detail_incomplete')
+          const sourceId = hash({ candidate: operations.state().selectedCandidate?.candidateKey ?? candidateSource, text: captured.text })
+          const [full] = await evaluateSources(scopedAgent, context.job.requirements!, [{ sourceId, name, text: captured.text }], signal, fallback.logger, 'detail', candidateFilters)
+          const fresh = await driver.resume(name)
+          const recorded = await execute('sourcing_record_candidate', { ...fresh, scope: captured.scope, fields: full!.fields,
+            assessments: full!.assessments, filterAssessments: full!.filterAssessments, analysis: judgementAnalysis(full!, context.job.requirements!) })
+          if (recorded.needsGreeting) await execute('sourcing_greet_candidate', await driver.greeting(name, recorded.candidateKey))
+          await returnToList()
+        }
+        const state = operations.state(), selected = state.selectedCandidate
+        if (state.needsGreeting) {
+          if (!selected) throw new SourcingHandoff('unfinished_candidate')
+          await execute('sourcing_greet_candidate', await driver.greeting(selected.name, selected.candidateKey))
+          await returnToList()
+        } else if (state.pending) {
+          if (!selected) throw new SourcingHandoff('unfinished_candidate')
+          let locator: ResumeLocator
+          if (context.broker.currentPage()?.dialogs?.length) locator = await driver.resume(selected.name)
+          else {
+            const cards = await driver.cards()
+            const matching = cards.filter(card => card.sourceId === selected.candidateKey || card.name === selected.name
+              && !!selected.verifiedListText && card.text === selected.verifiedListText)
+            if (matching.length !== 1) throw new SourcingHandoff('selected_card_changed')
+            locator = await driver.open(matching[0]!)
+          }
+          await finishSelected(selected.name, selected.candidateKey, locator)
+        }
+        if (!prepared || !operations.state().searchReady) {
+          if (operations.state().pending || operations.state().needsGreeting) throw new SourcingHandoff('unfinished_candidate')
+          await execute('sourcing_confirm_search', await driver.prepareSearch())
+          prepared = true
+          log('search_ready', { durationMs: Date.now() - started })
+        }
         for (let step = 0; step < 150 && !operations.complete(); step++) {
           signal.throwIfAborted()
           const state = operations.state()
           if (state.pending || state.needsGreeting) throw new SourcingHandoff('unfinished_candidate')
           const cards: SourcingCard[] = []
-          for (const card of (await driver.cards()).filter(c => !seen.has(c.sourceId)).slice(0, Math.min(3, operations.remaining()))) {
+          const visible = await driver.cards({ refresh: false })
+          // Remaining quota limits accepted resumes, not screening throughput.
+          // Even the final vacancy can require rejecting many visible cards.
+          for (const card of visible.filter(c => !seen.has(c.sourceId)).slice(0, 3)) {
             const preview = await operations.preview(card, signal)
             if (preview.duplicate) seen.add(card.sourceId)
             else cards.push({ ...card, text: preview.text })
@@ -69,7 +163,8 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
           if (!cards.length) {
             // Duplicates may precede unseen cards on this same page; consume
             // those before advancing the browser or asking the model again.
-            if ((await driver.cards()).some(c => !seen.has(c.sourceId))) continue
+            if (visible.some(c => !seen.has(c.sourceId))) continue
+            await operations.progress?.('当前可见人选已处理，正在滚动查找下一批候选人')
             const next = await driver.advance()
             if (next.exhaustion) {
               await execute('sourcing_finish', { status: 'completed', reason: '平台已无更多结果', exhaustion: next.exhaustion })
@@ -77,75 +172,97 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
             }
             continue
           }
+          await operations.progress?.(`正在对当前可见的 ${cards.length} 位候选人进行列表初筛`)
+          log('preview_batch', { count: cards.length, remaining: operations.remaining() })
           const assessments = await evaluateSources(scopedAgent, context.job.requirements!, cards, signal, fallback.logger, 'preview', candidateFilters)
           for (const capturedCard of cards) {
             if (operations.complete()) break
-            // Model latency or a previous detail invalidates old refs. Re-read
-            // and resolve the exact source, never a name-only masked match.
-            const card = (await driver.cards()).find(c => c.sourceId === capturedCard.sourceId)
-            if (!card) throw new SourcingHandoff('assessed_card_changed')
-            const freshPreview = await operations.preview(card, signal)
-            if (freshPreview.text !== capturedCard.text) throw new SourcingHandoff('assessed_evidence_changed')
-            const judgement = assessments.find(a => a.sourceId === card.sourceId)!
+            let card: SourcingCard | undefined, ready = false, assessedText = capturedCard.text
+            let judgement = assessments.find(row => row.sourceId === capturedCard.sourceId)!
+            for (let refresh = 0; refresh < 3; refresh++) {
+              // Rebind by stable identity after inference or returning from a
+              // resume. A different visible window is left for the next batch.
+              card = (await driver.cards()).find(c => c.sourceId === capturedCard.sourceId)
+              if (!card) break
+              const preview = await operations.preview(card, signal)
+              if (preview.duplicate) { seen.add(card.sourceId); card = undefined; break }
+              if (preview.text === assessedText) { ready = true; break }
+              // Text changes require a new source-bound assessment, not a
+              // browser navigation model. Renew refs again after that call.
+              if (refresh === 2) break
+              assessedText = preview.text
+              judgement = (await evaluateSources(scopedAgent, context.job.requirements!, [{ ...card, text: assessedText }], signal, fallback.logger, 'preview', candidateFilters))[0]!
+              log('preview_reassessed', { refresh: refresh + 1, reason: 'source_text_changed' })
+            }
+            if (!card) continue
+            if (!ready) throw new SourcingHandoff('candidate_evidence_unstable')
             const page = context.broker.currentPage()
             const selected = await execute('sourcing_select_candidate', { tabId: page.tabId, snapshotId: page.snapshotId,
-              name: card.name, ref: card.ref, evidenceRefs: card.evidenceRefs, ...(card.profileRef ? { profileRef: card.profileRef } : {}), assessments: judgement.assessments, filterAssessments: judgement.filterAssessments })
+              name: card.name, ref: card.ref, evidenceRefs: card.evidenceRefs, ...(card.profileRef ? { profileRef: card.profileRef } : {}), listAssessments: judgement!.listAssessments })
             seen.add(card.sourceId)
             if (!selected.qualified) continue
             const locator = await driver.open(card)
-            await execute('sourcing_read_resume', locator)
-            const captured = operations.captured()
-            if (!captured?.text) throw new SourcingHandoff('resume_not_captured')
-            const sourceId = hash({ candidate: card.sourceId, text: captured.text })
-            const [full] = await evaluateSources(scopedAgent, context.job.requirements!, [{ sourceId, name: card.name, text: captured.text }], signal, fallback.logger, 'detail', candidateFilters)
-            // Renew refs after the model call, while score evidence remains the
-            // already captured immutable text. Existing record hook rechecks it.
-            const fresh = await driver.resume(card.name)
-            const recorded = await execute('sourcing_record_candidate', { ...fresh, scope: captured.scope, fields: full!.fields,
-              assessments: full!.assessments, filterAssessments: full!.filterAssessments, analysis: judgementAnalysis(full!, context.job.requirements!) })
-            if (recorded.needsGreeting) await execute('sourcing_greet_candidate', await driver.greeting(card.name, recorded.candidateKey))
-            if (!operations.complete()) {
-              const returned = await driver.returnToList()
-              if (returned) await execute('sourcing_confirm_search', returned)
-            }
+            await finishSelected(card.name, card.sourceId, locator)
           }
         }
         if (!operations.complete()) throw new SourcingHandoff('step_budget')
         log('completed', { durationMs: Date.now() - started, modelMs, modelTurns: turns })
-        return { status: 'completed', message: '寻聘目标已完成', turns, modelMs, toolMs: Date.now() - started - modelMs }
+        return { completed: operations.complete(), hostState: operations.state() }
       } catch (error) {
         signal.throwIfAborted()
         // Unknown dispatch/storage outcomes NEVER fall through to AI replay.
         if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error))) throw error
-        const recoverable = error instanceof SourcingHandoff || recoverablePageError(error)
-          || /^(?:SOURCING_|SEARCH_CONDITIONS_UNVERIFIED|SEMANTIC_DETAILS_UNAVAILABLE)/.test(error instanceof Error ? error.message : '')
-        if (!recoverable) throw error
+        if (!recoverable(error)) throw error
         const state = operations.state()
-        log('handoff', { reason: error instanceof SourcingHandoff ? error.reason : browserFailureCode(error),
+        failedState = stateKey()
+        lastHandoff = error instanceof SourcingHandoff ? error.reason : browserFailureCode(error)
+        log('navigation_required', { reason: lastHandoff,
           durationMs: Date.now() - started, modelMs, modelTurns: turns, searchReady: state.searchReady,
           candidatePending: !!state.pending, needsGreeting: state.needsGreeting })
+        throw error
+      }
+    },
+  }
+  try {
+    let recoverySeeds: BrowserAgentSeed[] = []
+    if (driver) {
+      try {
+        await collection.execute({}, signal)
+        if (operations.complete()) return finish({ status: 'completed', message: '平台固定流程已完成', turns, modelMs,
+          toolMs: Math.max(0, Date.now() - started - modelMs) })
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!recoverable(error)) throw error
+        const value = await collection.recover!(error, {}, signal)
+        recoverySeeds = [{ name: collection.name, args: {}, value: { error: { code: browserFailureCode(error),
+          message: error instanceof Error ? error.message : String(error) }, recovery: value } }]
       }
     }
-    const page = context.broker.currentPage()
-    let observations = fallback.initialToolResults ?? []
-    if (page?.tabId) {
-      const tool = context.broker.tools.find(t => t.name === 'browser_snapshot')!
-      const args = { tabId: page.tabId }
-      observations = [{ name: tool.name, args, value: await tool.execute(args, signal) }]
-    }
-    const preparingRecovery = allowResume && driverRecognized && !operations.state().searchReady
-    const canResume = () => preparingRecovery && operations.state().searchReady && !operations.state().pending && !operations.state().needsGreeting
-    const result = await agent({ ...fallback, tools: operations.recoveryTools(scopedAgent), signal, initialToolResults: [...observations, ...seeds],
-      goal: { ...fallback.goal, requirements: context.job.requirements, hostState: operations.state(), capturedResume: operations.captured() },
-      isComplete: () => operations.complete() || canResume(),
+    const tools = operations.recoveryTools(scopedAgent)
+    if (driver) tools.unshift(collection)
+    const result = await agent({ ...fallback, tools, signal,
+      system: fallback.system + '\n平台固定流程已在模型之前直接执行。你只处理当前异常或未识别页面；宿主会在你改变页面后自动尝试接回固定流程，不必逐个选择已知列表的人选、反复读取或调用sourcing_collect。保留当前人选与结果；不要重新启动任务。',
+      goal: { ...fallback.goal, requirements: context.job.requirements, hostState: operations.state() },
+      initialToolResults: recoverySeeds.length ? [...(fallback.initialToolResults ?? []).filter(seed => seed.name === 'browser_list_tabs'), ...recoverySeeds] : fallback.initialToolResults,
+      beforeTurn: driver ? async toolSignal => {
+        const seeds = await fallback.beforeTurn?.(toolSignal) ?? []
+        if (operations.complete() || failedState === stateKey()) return seeds
+        try {
+          const value = await collection.execute({}, toolSignal)
+          return [...seeds, { name: collection.name, args: {}, value }]
+        } catch (error) {
+          toolSignal.throwIfAborted()
+          if (!recoverable(error)) throw error
+          const value = await collection.recover!(error, {}, toolSignal)
+          return [...seeds, { name: collection.name, args: {}, value: { error: { code: browserFailureCode(error),
+            message: error instanceof Error ? error.message : String(error) }, recovery: value } }]
+        }
+      } : fallback.beforeTurn,
+      isComplete: operations.complete,
+      maxTurns: driver ? Math.min(fallback.maxTurns ?? 8, 8) : fallback.maxTurns,
       maxDurationMs: Math.max(1, budget - (Date.now() - started)) })
     if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(result.message)) throw new Error(result.message)
-    if (!operations.complete() && canResume() && result.status === 'completed') {
-      const resumed = await runSourcingWorkflow(platform, { ...context, signal }, operations, agent,
-        { ...fallback, maxDurationMs: Math.max(1, budget - (Date.now() - started)) }, false)
-      return { ...resumed, turns: turns + result.turns + resumed.turns, modelMs: modelMs + result.modelMs + resumed.modelMs,
-        toolMs: Math.max(0, Date.now() - started - modelMs - result.modelMs - resumed.modelMs) }
-    }
-    return { ...result, turns: turns + result.turns, modelMs: modelMs + result.modelMs, toolMs: Math.max(0, Date.now() - started - result.modelMs - modelMs) }
+    return finish({ ...result, ...(result.status === 'budget' && lastHandoff ? { message: `${result.message}；最近固定流程问题：${lastHandoff}` } : {}),
+      turns: turns + result.turns, modelMs: modelMs + result.modelMs, toolMs: Math.max(0, Date.now() - started - result.modelMs - modelMs) })
   } finally { clearTimeout(timer) }
 }

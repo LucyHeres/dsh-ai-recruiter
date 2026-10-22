@@ -1,3 +1,4 @@
+import { recruiterMessageSource as source } from './llm-message-source.js'
 import { BlockAssembler, createAssistantMessage, createToolResultMessage, createUserMessage, type GenerateOptions, type Message, type ToolCallBlock, type ToolSchema } from '@deepseek-ai/dsh-llm'
 import { z } from 'zod'
 import { inspectionSchemas, MAX_INSPECTION_CHARACTERS, type InspectionName, type PageInspector } from './page-inspection.js'
@@ -7,7 +8,6 @@ import { safeError } from './task-error.js'
 import { modelObservation, modelPageObservation } from './model-observation.js'
 
 type Llm = { stream(options: GenerateOptions): AsyncIterable<import('@deepseek-ai/dsh-llm').StreamChunk> }
-const source = { kind: 'plugin' as const, plugin: 'dsh-ai-recruiter' }
 const descriptions: Record<string, string> = {
   page_record_result: '依据操作后的实际页面证据核对当前操作 completed / not_completed / unknown，派发动作不算目标完成；明确未完成后可重新规划同一目标。',
   page_submit: '为当前已记录的操作执行后续业务提交，目标可以在任何已观察的页面结构中。遵守用户授权范围，不重放结果不明的提交。',

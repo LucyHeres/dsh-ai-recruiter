@@ -30,14 +30,14 @@ export class SourcingGreeting {
     private save: () => Promise<void>, private progress: (phase: string, message: string) => Promise<void>, private policy: Partial<GreetingPolicy> = {}) {}
   allows(call: AgentBrowserCall) { return call.name === 'browser_click' && call.purpose === 'business_write' && !!this.authorized
     && call.args.tabId === this.authorized.tabId && call.args.snapshotId === this.authorized.snapshotId && call.args.ref === this.authorized.ref }
-  queue(candidate: SourcingCandidate, identity: string, page?: any) {
+  queue(candidate: SourcingCandidate, identity: string, page?: any, foregroundSource?: string) {
     if (!this.job.autoGreet) return
     const legacyKey = hash([candidate.platform, candidate.profileUrl || normalized(identity)])
     const row = { key: candidate.platformIdentity ? platformIdentityKey(candidate.platform, candidate.platformIdentity) : legacyKey,
       platformIdentity: candidate.platformIdentity, identityAliases: greetingIdentityAliases(candidate.platform, candidate.profileUrl, identity), candidateKey: candidate.key, platform: candidate.platform,
       name: candidate.name, identityKind: candidate.platformIdentity ? 'platform_id' as const : candidate.profileUrl ? 'url' as const : 'text' as const, stage: 'sending' as const, detail: '等待核对页面后打招呼，尚未派发', updatedAt: new Date().toISOString() }
     ;(this.job.greetings ??= []).push(row); this.awaiting = candidate.key
-    this.detailIdentity = page ? bindResumeDetail(page, candidate) : undefined
+    this.detailIdentity = page ? bindResumeDetail(page, candidate, foregroundSource) : undefined
   }
   async execute(input: z.infer<typeof sourcingGreetingSpec>, signal: AbortSignal) {
     const candidate = this.job.candidates.find(row => row.key === input.candidateKey && row.platform === this.platform)
@@ -49,18 +49,22 @@ export class SourcingGreeting {
     const adapter = recruitmentPlatform(this.platform)
     await this.broker.inspectRefs(page, refs, signal, true, !!adapter.candidateIdentity)
     this.broker.candidateContext(page, [input.ref, input.identityRef, ...input.evidenceRefs], candidate.name)
-    // Both identity and action must belong to the same person. Names alone never join identities.
-    const identity = { name: candidate.name, ref: input.identityRef, evidenceRefs: input.evidenceRefs, profileRef: input.profileRef }
-    const quote = assertCandidateQuote(page, identity)
-    assertCandidateQuote(page, { name: candidate.name, ref: input.ref, evidenceRefs: [input.identityRef, ...input.evidenceRefs] })
-    const profile = candidateProfile(page, identity, PLATFORMS[this.platform].origins).url
     const currentIdentity = adapter.candidateIdentity?.(page, [input.ref, input.identityRef, ...input.evidenceRefs], this.broker)
     const detailMatches = !currentIdentity && matchesResumeDetail(this.detailIdentity, page, candidate.key, [input.ref, input.identityRef, ...input.evidenceRefs])
-    const legacyKey = hash([this.platform, candidate.profileUrl ? profile : normalized(quote)])
-    const identityMatches = candidate.platformIdentity && currentIdentity
-      ? platformIdentityKey(this.platform, currentIdentity) === row.key
-      : [row.key, ...(row.identityAliases ?? [])].includes(legacyKey)
-        || detailMatches
+    // A bound foreground checks the exact read source plus every node's owner.
+    // It needs neither the list quote nor a name duplicated on a parent-owned
+    // button. Other paths still validate both identity and action quotes.
+    let identityMatches = detailMatches
+    if (!detailMatches) {
+      const identity = { name: candidate.name, ref: input.identityRef, evidenceRefs: input.evidenceRefs, profileRef: input.profileRef }
+      const quote = assertCandidateQuote(page, identity)
+      assertCandidateQuote(page, { name: candidate.name, ref: input.ref, evidenceRefs: [input.identityRef, ...input.evidenceRefs] })
+      const profile = candidateProfile(page, identity, PLATFORMS[this.platform].origins).url
+      const legacyKey = hash([this.platform, candidate.profileUrl ? profile : normalized(quote)])
+      identityMatches = candidate.platformIdentity && currentIdentity
+        ? platformIdentityKey(this.platform, currentIdentity) === row.key
+        : [row.key, ...(row.identityAliases ?? [])].includes(legacyKey)
+    }
     if (!identityMatches) throw new Error(`CANDIDATE_EVIDENCE_INVALID: ${currentIdentity ? 'GREETING_RESUME_ID_MISMATCH 当前简历ID与已评分人选不一致' : 'GREETING_DETAIL_UNVERIFIED 当前页面未能关联已保存的简历；请引用同一前景简历的身份和按钮，或返回已验证的列表卡片'}`)
     const searchEvidence = recruitmentPlatform(this.platform).createSearchEvidence(this.broker)
     await searchEvidence.inspect(page, [input.position.ref], signal)

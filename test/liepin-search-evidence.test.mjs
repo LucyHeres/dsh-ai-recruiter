@@ -85,6 +85,6 @@ test('recommendation education summary covers higher degrees without inventing m
   await resolver.scan(page, ['Java开发'], { education: '本科' }, new AbortController().signal)
   assert.deepEqual(resolver.summary(page, { education: '本科' }).educationPlan.missingLevels, [])
   assert.equal(inspections, 0)
-  assert.equal(resolver.position(page, { jobId: 'local', jobName: 'Java开发', platformJobs: [{ id: '123', name: 'Java开发' }] }, { ref: 'position' }).verification.level, 'exact')
-  assert.equal(resolver.position(page, { jobId: 'local', jobName: 'Java开发', platformJobs: [{ id: '456', name: 'Java开发' }] }, { ref: 'position' }).ok, false)
+  assert.equal(resolver.position(page, { jobId: 'local', jobName: 'Java开发', platformJobs: [{ id: '123', name: 'Java开发' }] }, { ref: 'position' }).verification.level, 'degraded')
+  assert.equal(resolver.position(page, { jobId: 'local', jobName: 'Java开发', platformJobs: [{ id: '456', name: 'Java开发' }] }, { ref: 'position' }).ok, true)
 })

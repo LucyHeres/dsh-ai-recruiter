@@ -213,7 +213,7 @@ test('core and broker return a new ordinary browser error to the model before it
     isFatal: error => /BROWSER_WRITE_OUTCOME_UNKNOWN/.test(String(error)), maxTurns: 3, maxDurationMs: 1000,
   })
   assert.equal(result.status, 'completed')
-  const errors = llm.requests[1].messages.flatMap(message => message.content.filter(block => block.type === 'tool-result' && block.isError))
+  const errors = llm.requests[1].messages.filter(message => message.role === 'tool' && message.isError)
   assert.match(errors[0].content[0].text, /AN_UNSEEN_ORDINARY_ERROR/)
   assert.equal(f.calls.at(-1).name, 'browser_future_path')
 })
@@ -393,7 +393,7 @@ test('stale reference failure returns a fresh read in the same model turn withou
       execute: async () => { complete = true; return {} } }], signal: f.controller.signal, isComplete: () => complete,
   })
   assert.equal(result.status, 'completed'); assert.equal(result.turns, 2)
-  const reply = llm.requests[1].messages.flatMap(message => message.content).find(block => block.type === 'tool-result')
+  const reply = llm.requests[1].messages.find(message => message.role === 'tool')
   const body = JSON.parse(reply.content[0].text)
   assert.equal(body.recovery.snapshot.snapshotId, 's2'); assert.match(body.recovery.snapshot.tree, /ref=a/)
   assert.equal(f.calls.filter(row => row.name === 'browser_click').length, 1)
@@ -501,7 +501,7 @@ test('recovery observations are compacted with normal observations while error i
   await runBrowserAgent(llm, { provider: 'host', model: 'default' }, {
     system: 'Test', goal: {}, tools: f.broker.tools, signal: f.controller.signal, maxTurns: 4,
   })
-  const results = llm.requests.at(-1).messages.flatMap(message => message.content).filter(block => block.type === 'tool-result')
+  const results = llm.requests.at(-1).messages.filter(message => message.role === 'tool')
   const failed = results.find(block => block.toolCallId === 'failed')
   const body = JSON.parse(failed.content[0].text)
   assert.equal(failed.isError, true); assert.equal(body.error.code, 'PAGE_CHANGED')
@@ -546,7 +546,7 @@ test('superseded snapshots are compacted per tab while action receipts, latest p
     system: 'Test', goal: {}, tools: f.broker.tools, signal: f.controller.signal, maxTurns: 6,
     logger: { write: (level, event, fields) => logs.push({ event, fields }) },
   })
-  const last = llm.requests.at(-1), replies = last.messages.flatMap(message => message.content).filter(block => block.type === 'tool-result')
+  const last = llm.requests.at(-1), replies = last.messages.filter(message => message.role === 'tool')
   assert.deepEqual(replies.map(reply => reply.toolCallId), ['read1', 'click2', 'other', 'read4', 'read5'])
   const body = replies.map(reply => JSON.parse(reply.content[0].text))
   assert.equal(body[0].representation, 'historical-snapshot-summary')

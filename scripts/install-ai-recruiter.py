@@ -9,45 +9,54 @@
     python3 scripts/install-ai-recruiter.py --check    # 只自检，不安装
 """
 import json
-import os
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
+from xinling_runtime import xinling_runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = json.loads((ROOT / 'package.json').read_text())['version']
 TGZ = ROOT / 'artifacts' / f'dsh-ai-recruiter-{VERSION}.tgz'
 PROFILE = 'desktop'
-APP = Path('/Applications/薪灵.app/Contents')
 
 
-def xinling_runtime():
-    """定位薪灵内置的 Node 与 pnpm（与 scripts/xinling-dsh.py 同一套）。"""
-    generations = Path.home() / 'Library/Application Support/Cinlyn/runtime-commands/generations'
-    pnpm = [p for p in sorted(generations.glob('*/bin/pnpm'), key=lambda p: p.stat().st_mtime, reverse=True)
-            if (p.parent.parent / 'private/node-bin/node').is_file()]
-    if not (APP / 'MacOS/薪灵').is_file() or not pnpm:
-        return None
-    return pnpm[0], pnpm[0].parent.parent / 'private/node-bin/node'
-
-
-def check_gateway(node):
+def check_gateway():
     path = ROOT / 'browser-agent-gateway/mcp-server.js'
     return ('插件内置网关', str(path)) if path.is_file() else (None, None)
+
+
+def installation_mismatches(archive_path, installed):
+    """Compare package contents, including same-version local tarball replacements."""
+    mismatches = []
+    with tarfile.open(archive_path) as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            path = Path(member.name)
+            if path.parts[0] != 'package' or '..' in path.parts:
+                raise RuntimeError('安装包包含无效路径')
+            relative = Path(*path.parts[1:])
+            filename = installed / relative
+            if not filename.is_file() or filename.read_bytes() != archive.extractfile(member).read():
+                mismatches.append(str(relative))
+    return mismatches
 
 
 def main():
     check_only = '--check' in sys.argv
     ok = True
 
-    runtime = xinling_runtime()
-    if not runtime:
-        print('✗ 未找到薪灵内置运行环境。请先启动薪灵客户端，等初始化完成后再试。')
+    try:
+        runtime = xinling_runtime()
+    except RuntimeError as error:
+        print(f'✗ {error}')
         return 1
-    pnpm, node = runtime
-    print(f'✓ 薪灵运行环境：{node}')
+    print(f'✓ 当前薪灵客户端：{runtime.client_version}')
+    print(f'✓ 客户端 CLI：{runtime.bootstrap}')
+    print(f'✓ 客户端运行环境：{runtime.node}')
 
-    label, path = check_gateway(node)
+    label, path = check_gateway()
     if path:
         print(f'✓ 薪招网关 MCP 入口（{label}）：{path}')
     else:
@@ -68,27 +77,30 @@ def main():
         print('\n自检结束（未安装）。')
         return 0 if ok else 1
 
-    env = dict(os.environ)
-    env.update({
-        'DSH_HOME': str(Path.home() / '.xsh'),
-        'ELECTRON_RUN_AS_NODE': '1',
-        'PATH': os.pathsep.join([str(pnpm.parent), str(node.parent), env.get('PATH', '')]),
-        'NODE': str(node),
-    })
+    installed = runtime.user_directory / '.xsh/profiles' / PROFILE / 'node_modules/dsh-ai-recruiter'
+    manifest = installed / 'package.json'
+    if manifest.is_file() and json.loads(manifest.read_text()).get('version') == VERSION:
+        if installation_mismatches(TGZ, installed):
+            print('✗ 同版本安装包内容已变化，请递增插件版本并重新打包后安装，避免复用旧缓存。')
+            return 1
+        print('\n✓ 当前版本已安装，全部文件与安装包一致，无需重复安装。')
+        return 0
     print(f'\n安装到 profile「{PROFILE}」…')
     code = subprocess.call(
-        [str(APP / 'MacOS/薪灵'), '--expose-internals', str(APP / 'Resources/app.asar/lib/desktop-cli.js'),
-         'plugin', '--profile', PROFILE, 'add', str(TGZ)],
-        env=env,
+        runtime.command('plugin', '--profile', PROFILE, 'add', str(TGZ)),
+        env=runtime.environment(),
     )
     if code:
         print('✗ 安装失败。')
         return code
 
-    print('\n✓ 已安装。接下来：')
+    mismatches = installation_mismatches(TGZ, installed)
+    if mismatches:
+        print('✗ 安装后文件与安装包不一致：' + '、'.join(mismatches[:5]))
+        return 1
+    print('\n✓ 已安装，全部文件与安装包一致。接下来：')
     print('  1) 完全退出并重开薪灵（插件在启动时挂载）。')
-    print('  2) 首次使用先运行 node browser-agent-gateway/manage.cjs setup，')
-    print('     在薪招扩展设置中导入生成的配对文件，结束已有任务后重新加载扩展。')
+    print('  2) 安装并启用正式版薪招扩展，插件启动后自动注册本机桥接并连接。')
     print('  3) 新建会话，调用 ai_recruit_help，确认：')
     print('       browser.available = true（包内 MCP 工具可发现）')
     print('       browser.ready = true 才表示网关与扩展已连接')

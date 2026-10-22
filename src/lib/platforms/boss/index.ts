@@ -1,11 +1,13 @@
 import { StandardPositionRoute, StandardSearchEvidence, type RecruitmentPlatform } from '../types.js'
 import { bossDefinition } from './definition.js'
+import { BossSourcingDriver } from './sourcing-driver.js'
 
-/** Until a BOSS sourcing driver is verified, the same session is driven by AI.
- * Generic workflow code does not guess BOSS paths from Liepin conventions. */
+/** BOSS owns its fixed route; changed components use the common AI recovery. */
 export const bossPlatform: RecruitmentPlatform = {
   sourcingEntry: bossDefinition.sourcingEntry,
   sourcingHints: '',
+  observationFormat: 'dom',
   createSearchEvidence: () => new StandardSearchEvidence(),
   createPositionRoute: () => new StandardPositionRoute(),
+  createSourcingDriver: context => new BossSourcingDriver(context),
 }

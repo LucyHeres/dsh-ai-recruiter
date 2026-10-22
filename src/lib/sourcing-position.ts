@@ -47,16 +47,22 @@ export async function readSourcingPosition(xin: XinClient | null, id: string, jo
     : row.salaryRange != null && row.salaryRange !== '' ? salary[String(row.salaryRange)] || '' : ''
   const rich = jobRichText(row.jobDesc || row.filterDesc)
   const text = plainJobText(row.jobDesc || row.filterDesc)
-  const requirements = [row.workAge != null && row.workAge !== '' && experience[String(row.workAge)] ? `工作经验：${experience[String(row.workAge)]}` : '',
-    row.eduGrade != null && row.eduGrade !== '' && degree[String(row.eduGrade)] ? `学历要求：${degree[String(row.eduGrade)]}` : '',
-    plainJobText(row.workCity) ? `工作地点：${plainJobText(row.workCity)}` : '', salaryText ? `薪酬范围：${salaryText}` : ''].filter(Boolean)
+  const basicRequirements = {
+    education: row.eduGrade != null && row.eduGrade !== '' ? degree[String(row.eduGrade)] || '' : '',
+    experience: row.workAge != null && row.workAge !== '' ? experience[String(row.workAge)] || '' : '',
+    city: plainJobText(row.workCity), salary: salaryText,
+  }
+  const requirements = [basicRequirements.experience ? `工作经验：${basicRequirements.experience}` : '',
+    basicRequirements.education ? `学历要求：${basicRequirements.education}` : '',
+    basicRequirements.city ? `工作地点：${basicRequirements.city}` : '', salaryText ? `薪酬范围：${salaryText}` : ''].filter(Boolean)
+  const html = /<\/?[a-z][^>]*>/i.test(rich) ? rich : escapeHtml(rich).replace(/\n/g, '<br>')
   return { id, name: selected.name, department: plainJobText(row.department), city: plainJobText(row.workCity),
     publishedChannels: selected.publishedChannels,
     platforms: selected.publishedChannels ? sourcingPlatformsForChannels(selected.publishedChannels) : selected.platforms ?? [],
-    searchFields: { city: plainJobText(row.workCity), experience: experience[String(row.workAge)] || '', education: degree[String(row.eduGrade)] || '' },
+    searchFields: { city: basicRequirements.city, experience: basicRequirements.experience, education: basicRequirements.education },
+    basicRequirements, jobDescription: { text, html },
     description: [text, ...requirements].filter(Boolean).join('\n'),
-    descriptionHtml: (/<\/?[a-z][^>]*>/i.test(rich) ? rich : escapeHtml(rich).replace(/\n/g, '<br>'))
-      + requirements.map(line => `<p>${escapeHtml(line)}</p>`).join(''), fetchedAt: new Date().toISOString() }
+    descriptionHtml: html + requirements.map(line => `<p>${escapeHtml(line)}</p>`).join(''), fetchedAt: new Date().toISOString() }
 }
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))

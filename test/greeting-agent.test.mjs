@@ -217,7 +217,7 @@ test('hidden or modal-background candidate evidence cannot establish the recipie
 test('ordinary predispatch failure is an observation, not an automatic task interruption', async () => {
   const out = await fixture([[snapshot], [select, write], request => {
     assert.match(JSON.stringify(request.messages), /ELEMENT_OCCLUDED/)
-    const error = request.messages.flatMap(message => message.content).findLast(block => block.type === 'tool-result' && block.isError)
+    const error = request.messages.findLast(message => message.role === 'tool' && message.isError)
     assert.equal(JSON.parse(error.content[0].text).recovery.snapshot.snapshotId, 's2')
     return [{ name: 'task_report_result', args: { ...report.args, outcome: 'not_completed', reason: '平台显示未发送' } }, finish]
   }], { writeError: 'ELEMENT_OCCLUDED' })
@@ -310,7 +310,7 @@ test('a proven unsent retry updates the existing candidate record instead of app
   const out = await fixture([[snapshot], [select, write], request => {
     // PAGE_CHANGED now returns a read-only refreshed snapshot in the failed
     // call result, avoiding the old extra snapshot/model turn.
-    const errors = request.messages.flatMap(message => message.content).filter(block => block.type === 'tool-result' && block.isError)
+    const errors = request.messages.filter(message => message.role === 'tool' && message.isError)
     assert.equal(JSON.parse(errors.at(-1).content[0].text).recovery.snapshot.snapshotId, 's2')
     return [{ ...report, args: { ...report.args, outcome: 'not_completed', reason: '明确未发送' } }, retrySelect, retryWrite]
   },

@@ -6,15 +6,19 @@ import { allowedTab, normalized, itemText, statesOf } from './page-actions.js'
 import { modelPageObservation } from './model-observation.js'
 import { safeError } from './task-error.js'
 import { browserFailureCode } from './browser-errors.js'
+import type { DeveloperLog } from './developer-log.js'
+import { actionEffects } from './action-effects.js'
 
 const Ajv = createRequire(import.meta.url)('ajv')
 export interface AgentBrowserCall { name: string; args: Record<string, any>; purpose: 'navigation' | 'business_write'; readOnly: boolean; signal: AbortSignal }
-type Options = { origins: readonly string[]; signal: AbortSignal; confirmationId: string; allow?: (info: McpToolInfo) => boolean; observationFormat?: 'semantic'; observationWait?: 'none' | 'dom_quiet' | ((name: string, args: Record<string, any>) => 'none' | 'dom_quiet') }
+type Options = { origins: readonly string[]; signal: AbortSignal; confirmationId: string; logger?: DeveloperLog; allow?: (info: McpToolInfo) => boolean; hostTools?: readonly string[]; observationFormat?: 'dom' | 'semantic'; observationViewportOnly?: boolean; observationWait?: 'none' | 'dom_quiet' | ((name: string, args: Record<string, any>) => 'none' | 'dom_quiet') }
 
 /** Tool transport, schema validation, task scope and observation cache. No page
  * workflow, button names or feature-specific recovery lives in this broker. */
 export class AgentBrowserTools {
   readonly tools: BrowserAgentTool[]
+  /** Read-only refreshes must not masquerade as recovery of a fixed route. */
+  inputRevision = 0
   private readonly pages = new Map<number, any>()
   private readonly inspectTails = new Map<number, Promise<unknown>>()
   private readonly inspected = new WeakMap<object, Set<string>>()
@@ -24,7 +28,7 @@ export class AgentBrowserTools {
   constructor(infos: McpToolInfo[], private readonly call: (tool: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<any>,
     private readonly options: Options) {
     const ajv = new Ajv({ allErrors: true, strict: false })
-    this.tools = infos.filter(info => info._meta?.browserAgent?.available === true && (options.allow?.(info) ?? true)).map(info => {
+    this.tools = infos.filter(info => (info._meta?.browserAgent?.available === true || options.hostTools?.includes(info.name)) && (options.allow?.(info) ?? true)).map(info => {
       const schema: any = structuredClone(info.inputSchema ?? { type: 'object', properties: {} })
       schema.properties ??= {}
       for (const key of ['policy', 'documentId']) delete schema.properties[key]
@@ -47,6 +51,7 @@ export class AgentBrowserTools {
         // enumerating observation-producing tool names.
         readOnly: readOnly && !('tabId' in schema.properties),
         execute: async (input: Record<string, unknown>, signal: AbortSignal) => {
+          const started = Date.now()
           const boundedInput = { ...input }
           // 只读能力没有 purpose 语义（只有写操作需要声明用途），schema 也不声明它。
           // 宿主内部调用方可能统一带上这个字段；它是宿主元数据，不该让整个任务因为
@@ -72,33 +77,55 @@ export class AgentBrowserTools {
               validationIssues: issues?.map((issue: any) => ({ path: issue.path, keyword: issue.keyword })) })
           }
           const { purpose = 'navigation', ...args } = boundedInput as Record<string, any>
+          const beforePage = this.pages.get(args.tabId)
           // Use the extension's existing bounded post-input observation, not a
           // second write or a separate model turn. Explicit options win.
           const observationWait = typeof options.observationWait === 'function' ? options.observationWait(info.name, args) : options.observationWait ?? 'dom_quiet'
           if (autoObserve && args.observe?.returnSnapshot !== 'none') args.observe = { wait: observationWait, returnSnapshot: 'viewport', requireChange: false, timeoutMs: observationWait === 'none' ? 500 : 2500, ...args.observe }
+          const observationFormat = args.observe?.format ?? options.observationFormat
           const intent = purpose === 'business_write' ? purpose : 'navigation'
-          const argsWithPolicy = { ...args, policy: { allowedOrigins: [...options.origins], maxWrites: 1000,
+          const argsWithPolicy: Record<string, any> = { ...args, policy: { allowedOrigins: [...options.origins], maxWrites: 1000,
             riskLevel: readOnly ? 'read' : intent === 'business_write' ? 'business_write' : 'browser_mutation',
             ...(intent === 'business_write' ? { requiresConfirmation: true, confirmationId: options.confirmationId } : {}) } }
+          // Older extensions attach only DOM snapshots. Ask them to settle once
+          // without capturing, then read the requested semantic format once.
+          // Explicit returnSnapshot=none keeps refs valid for grouped inputs.
+          if (autoObserve && args.observe?.returnSnapshot !== 'none' && observationFormat) {
+            const formats = schema.properties.observe?.properties?.format?.enum
+            argsWithPolicy.observe = !Array.isArray(formats) && observationFormat === 'dom' ? args.observe
+              : Array.isArray(formats) && formats.includes(observationFormat)
+              ? { ...args.observe, format: observationFormat }
+              : { ...args.observe, returnSnapshot: 'none' }
+          }
           if (args.snapshotId) {
             const page = this.getPage(args.tabId, args.snapshotId)
             if (args.ref && !page.items?.some((item: any) => item.ref === args.ref)) throw new Error('ELEMENT_NOT_FOUND')
             Object.assign(argsWithPolicy, { documentId: page.documentId })
           }
           await this.before?.({ name: info.name, args, purpose: intent, readOnly, signal })
-          if (info.name === 'browser_snapshot' && !args.format) Object.assign(argsWithPolicy, { format: 'semantic' })
+          const preflightMs = Date.now() - started
+          if (info.name === 'browser_snapshot') {
+            if (!args.format) argsWithPolicy.format = options.observationFormat ?? 'semantic'
+            if (args.viewportOnly === undefined && schema.properties.viewportOnly && options.observationViewportOnly !== undefined) argsWithPolicy.viewportOnly = options.observationViewportOnly
+          }
           const dispatch = async () => { let dispatched = false; try {
+            const remoteStarted = Date.now()
             const raw = this.withoutStaleSnapshot(await this.call(info.name, argsWithPolicy, signal))
+            try { options.logger?.write('info', 'browser_agent.browser_call', { tool: info.name, preflightMs,
+              remoteMs: Date.now() - remoteStarted, observationFormat,
+              waitedMs: (raw?.verification ?? raw?.output?.verification)?.waitedMs,
+              attachedSnapshot: !!(raw?.snapshot?.snapshotId || raw?.output?.snapshot?.snapshotId) }) } catch { /* observer only */ }
             dispatched = true
+            if (!readOnly) this.inputRevision++
             this.observe(raw, args.tabId)
             if (info.name === 'browser_inspect_element' && (raw?.item || raw?.element)) this.mergeInspection(args, raw.item ?? {}, raw)
             const value = this.format(raw)
             if (argumentAdjustments.length && value && typeof value === 'object' && !Array.isArray(value)) value.argumentAdjustments = argumentAdjustments
-            if (autoObserve && args.observe?.returnSnapshot !== 'none' && options.observationFormat
-              && (raw?.snapshot ?? raw?.output?.snapshot)?.format !== options.observationFormat) {
+            if (autoObserve && args.observe?.returnSnapshot !== 'none' && observationFormat
+              && (raw?.snapshot ?? raw?.output?.snapshot)?.format !== observationFormat) {
               const tabId = raw?.tabId ?? raw?.output?.tabId ?? args.tabId
               try {
-                const snapshot = await this.tools.find(tool => tool.name === 'browser_snapshot')!.execute({ tabId, format: options.observationFormat }, signal)
+                const snapshot = await this.tools.find(tool => tool.name === 'browser_snapshot')!.execute({ tabId, format: observationFormat }, signal)
                 return raw?.output?.snapshot ? { ...value, output: { ...value.output, snapshot } } : { ...value, snapshot }
               } catch (error) {
                 signal.throwIfAborted()
@@ -135,7 +162,14 @@ export class AgentBrowserTools {
             throw error
           } }
           const invocation = { name: info.name, args, purpose: intent, readOnly, signal }
-          return this.around ? this.around(invocation, dispatch) : dispatch()
+          const result = await (this.around ? this.around(invocation, dispatch) : dispatch())
+          if (!readOnly) {
+            try {
+              const effects = actionEffects(beforePage, this.pages.get(args.tabId), args.ref, result)
+              if (effects) return { ...result, effects }
+            } catch { /* Optional UI evidence must preserve the original action receipt. */ }
+          }
+          return result
         } }
     })
     if (!this.tools.some(tool => tool.name === 'browser_snapshot')) throw new Error('BROWSER_AGENT_TOOL_REGISTRY_UNAVAILABLE: 网关未提供通用 Agent 工具元数据')
@@ -275,7 +309,7 @@ export class AgentBrowserTools {
     const find = (item: any): any => {
       if (!item || typeof item !== 'object') return undefined
       if (item.representation === 'semantic-v1' && item.snapshotId) return item
-      for (const key of ['snapshot', 'page', 'output', 'recovery']) { const found = find(item[key]); if (found) return found }
+      for (const key of ['snapshot', 'page', 'output', 'recovery', 'observation', 'correction']) { const found = find(item[key]); if (found) return found }
     }
     const page = find(value), tabId = page?.tabId ?? args.tabId
     if (!page || !Number.isInteger(tabId)) return undefined
@@ -283,7 +317,7 @@ export class AgentBrowserTools {
       if (item === page) return { representation: 'historical-snapshot-summary', tabId, snapshotId: page.snapshotId, url: page.url,
         note: 'Superseded page content omitted. Use the latest snapshot; old refs are not actionable.' }
       if (!item || typeof item !== 'object') return item
-      return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, ['snapshot', 'page', 'output', 'recovery'].includes(key) ? summarize(child) : child]))
+      return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, ['snapshot', 'page', 'output', 'recovery', 'observation', 'correction'].includes(key) ? summarize(child) : child]))
     }
     return { key: `${tabId}:${page.frameId ?? args.frameId ?? 0}`, version: String(page.snapshotId), summary: summarize(value) }
   }
@@ -299,7 +333,7 @@ export class AgentBrowserTools {
   }
   private format(value: any): any {
     if (!value || typeof value !== 'object') return value
-    if (value.snapshotId && Array.isArray(value.items)) return { ...modelPageObservation(value), tabId: value.tabId, ...(value.frameId === undefined ? {} : { frameId: value.frameId }) }
+    if (value.snapshotId && Array.isArray(value.items)) return { ...modelPageObservation(value, { compact: true }), tabId: value.tabId, ...(value.frameId === undefined ? {} : { frameId: value.frameId }) }
     if (Array.isArray(value)) return value.map(item => this.format(item))
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, ['snapshot', 'page', 'output'].includes(key) ? this.format(item) : item]))
   }

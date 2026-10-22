@@ -4,6 +4,7 @@ import type { BrowserAgentOptions, BrowserAgentResult, BrowserAgentSeed } from '
 import type { BrowserAgentRunner } from './host-browser-agent.js'
 import { readCandidate } from './candidate-entry.js'
 import { findPositionEvidence, type PositionEvidence, type PositionVerification } from './position-evidence.js'
+import { positionChoices, positionControl, positionNameMatches } from './position-controls.js'
 import { itemText, normalized, safePageUrl, statesOf } from './page-actions.js'
 import { safeError } from './task-error.js'
 import { browserFailureCode } from './browser-errors.js'
@@ -165,21 +166,16 @@ class PlatformPreset {
     const job = this.dependencies.job as GreetingJob
     const items: any[] = Array.isArray(page?.items) ? page.items : []
     const targets = job.platformJobs?.length ? job.platformJobs : [{ name: job.jobName, id: '' }]
-    // 名称候选：目标职位在下拉/标签里的可点击项。ID 证据缺失时不能只靠名称点击，
-    // 因为平台上可能存在同名但不同城市的多个职位。
-    const named = items.filter((item: any) => actionable(item) && ['tab', 'option', 'menuitem'].includes(item.role)
-      && targets.some(target => label(item) === normalized(target.name)))
-    const preferred = job.selectedPlatformJob
-    if (preferred?.id) {
-      const chosen = single(named.filter((item: any) => this.observedId(page, item, preferred.id)))
-      if (chosen) return this.input(page, chosen, 'browser_click')
-    }
-    const identified = named.filter((item: any) => targets.some(target => target.id && this.observedId(page, item, target.id)))
-    const option = single(identified)
+    const named = items.filter((item: any) => actionable(item) && positionControl(page, item) && !statesOf(item).some(state => ['selected', 'checked', 'current'].includes(state)) && ['tab', 'option', 'menuitem'].includes(item.role)
+      && targets.some(target => positionNameMatches(page, item, target.name || '')))
+    const choices = positionChoices(page, named, targets, job.selectedPlatformJob?.id)
+    const option = single(choices)
     if (option) return this.input(page, option, 'browser_click')
-    // 两个以上同名选项且都没有 ID 证据：模型同样无从选择（用户的意图不在页面上），
-    // 立即停止并给出可操作结论，不进入「试一次→交棒→再试」的空转。
-    if (identified.length > 1 || named.length > 1) { this.reason = 'duplicate_target_jobs'; return }
+    // A unique name is enough; multiple same-name jobs need observed business
+    // evidence. A widget's dynamic DOM ID cannot resolve the user's intent.
+    if (named.length > 1 || named.length && targets.filter(target => named.some(item => positionNameMatches(page, item, target.name || ''))).length > 1) {
+      this.reason = 'duplicate_target_jobs'; return
+    }
     const trigger = single(items.filter((item: any) => actionable(item) && (item.role === 'combobox'
       || /^(?:切换职位|选择职位|全部职位|更多职位)$/.test(label(item))) && (item.hasPopup || item.role === 'combobox')))
     if (trigger) {
@@ -190,11 +186,6 @@ class PlatformPreset {
       this.hoveredTriggers.add(key)
       return this.input(page, trigger, 'browser_hover')
     }
-  }
-  private observedId(page: any, item: any, id: string) {
-    const tokens = String(item.elementId ?? '').split(/[^A-Za-z0-9]+/)
-    if (tokens.includes(id)) return true
-    try { return [...new URL(item.href, page.url).searchParams.values()].includes(id) } catch { return false }
   }
   /** 只有声明了 frameId 的工具才接受它；0（顶层）与未声明都不传。 */
   private acceptsFrameId(name: string) {

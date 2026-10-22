@@ -18,6 +18,7 @@ const CAPABILITIES = Object.freeze([
   'browser.inspect_element',
   'browser.accessibility',
   'browser.network_requests',
+  'browser.network_response',
   'browser.wait',
   'browser.click',
   'browser.hover',

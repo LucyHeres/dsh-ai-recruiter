@@ -1,6 +1,6 @@
 import { logKey, logPageUrl } from './developer-log.js'
 import { itemText, normalized, statesOf } from './page-actions.js'
-import { sourcingCriterionScore } from '../shared/sourcing-score.js'
+import { SOURCING_MAX_CRITERIA, sourcingCriterionScore } from '../shared/sourcing-score.js'
 import type { SourcingAssessment, SourcingCriterion } from '../shared/sourcing.js'
 
 // UI vocabulary only. Unknown labels, names, contexts and evidence never enter logs.
@@ -25,11 +25,12 @@ export function sourcingTargetDiagnostic(page: any, ref: unknown, selectedName?:
 export function sourcingAssessmentDiagnostic(criteria: SourcingCriterion[], assessments: unknown, evidence: string) {
   const rows: SourcingAssessment[] = Array.isArray(assessments) ? assessments : []
   const source = normalized(evidence)
-  return criteria.slice(0, 8).map(criterion => {
+  return criteria.slice(0, SOURCING_MAX_CRITERIA).map(criterion => {
     const row = rows.find(row => row?.criterionId === criterion.id)
     const state = row && ['match', 'partial', 'mismatch', 'unknown'].includes(row.state) ? row.state : undefined
     const quote = normalized(row?.quote)
-    return { criterionId: criterion.id, weight: criterion.weight, state, points: state ? sourcingCriterionScore(criterion.weight, state) : undefined,
+    const scoredState = state === 'match' && (row?.evidenceKind === 'inferred' || row?.confidence === 'low') ? 'partial' : state
+    return { criterionId: criterion.id, weight: criterion.weight, tier: criterion.tier, state, points: scoredState ? sourcingCriterionScore(criterion.weight, scoredState) : undefined,
       quoteProvided: !!quote, quoteFound: !!quote && source.includes(quote) }
   })
 }

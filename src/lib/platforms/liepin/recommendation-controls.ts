@@ -1,4 +1,5 @@
 import { normalized, statesOf } from '../../page-actions.js'
+import { positionControl, positionNameMatches } from '../../position-controls.js'
 import type { SearchControl } from '../types.js'
 const hasClass = (node: any, value: string) => String(node?.attributes?.class ?? '').split(/\s+/).some(token => token === value || token.startsWith(`${value}--`))
 export function recommendationFilterDialog(page: any) {
@@ -6,8 +7,7 @@ export function recommendationFilterDialog(page: any) {
 }
 export const recommendationFilterLabel = (name: unknown) => normalized(name).startsWith('筛选')
 
-/** Recommendation job tabs expose their role/selection and, when available,
- * rc-tabs job ID. Reuse those semantics without search-page CSS assumptions. */
+/** Recognize the observed job title and tab state, independent of DOM IDs. */
 export function liepinRecommendationControl(item: any, names: string[], page?: any, detail?: any): (Omit<SearchControl, 'field'> & { field?: 'city' | 'education' | 'experience' }) | undefined {
   const states = statesOf(item)
   const active = !states.some(s => ['hidden', 'invisible', 'blocked_by_dialog', 'disabled'].includes(s)) && detail?.element?.visible !== false && detail?.element?.css?.pointerEvents !== 'none'
@@ -15,7 +15,7 @@ export function liepinRecommendationControl(item: any, names: string[], page?: a
   const expanded = states.includes('expanded')
   const name = normalized(item.name)
   if (item.role === 'button' && !item.dialogRef && recommendationFilterLabel(name)) return { kind: 'filter_open', active, selected: false, expanded }
-  if (item.role === 'tab' && (names.some(n => name === n || name.startsWith(n + ' ')) || /^rc-tabs-\d+-tab-\d+$/.test(String(item.elementId ?? '')))) {
+  if (item.role === 'tab' && positionControl(page, item) && names.some(n => positionNameMatches(page, item, n))) {
     return { kind: selected ? 'position' : 'job_option', active, selected, expanded }
   }
   if (!expanded && ['button', 'combobox'].includes(item.role) && !['input', 'textarea'].includes(String(item.tagName).toLowerCase())) {

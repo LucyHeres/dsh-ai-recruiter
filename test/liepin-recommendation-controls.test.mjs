@@ -10,7 +10,7 @@ function fixture() {
   const resolver = new LiepinSearchEvidence({ getInspection: (_page, ref) => inspections.find(row => row.ref === ref), inspectRefs: async () => {} })
   return { page, inspections, resolver }
 }
-test('real recommendation drawer spans are filter navigation and same-label candidate text is not', async () => {
+test('real recommendation drawer spans resolve as filters while same-label candidate text grants no filter evidence', async () => {
   const { page, resolver } = fixture()
   await resolver.scan(page, [], { education: '本科' }, new AbortController().signal)
   const item = page.items.find(item => item.name === '本科')
@@ -20,7 +20,7 @@ test('real recommendation drawer spans are filter navigation and same-label cand
   assert.doesNotThrow(() => assertSourcingNavigation(call, page, undefined, false, !!control))
   const candidatePage = { ...page, dialogs: [], items: [{ ...item, dialogRef: undefined }] }
   assert.equal(resolver.control(candidatePage, item.ref), undefined)
-  assert.throws(() => assertSourcingNavigation(call, candidatePage), /NAVIGATION_UNVERIFIED/)
+  assert.doesNotThrow(() => assertSourcingNavigation(call, candidatePage), 'generic navigation is left to the model and browser hit-test')
 })
 test('drawer title counts and selected CSS are state changes, not a new unknown component', async () => {
   const { page, inspections, resolver } = fixture()

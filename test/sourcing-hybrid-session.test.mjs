@@ -15,7 +15,7 @@ const properties = { tabId: { type: 'integer' }, snapshotId: { type: 'string' },
 const info = (name, readOnly, properties, required = []) => ({ name, inputSchema: { type: 'object', properties, required, additionalProperties: false },
   annotations: { readOnlyHint: readOnly }, _meta: { browserAgent: { available: true } } })
 const infos = [info('browser_list_tabs', true, {}), info('browser_snapshot', true, { tabId: properties.tabId, format: { type: 'string' }, viewportOnly: { type: 'boolean' } }),
-  info('browser_inspect_element', true, properties), info('browser_click', false, properties), info('browser_scroll', false, { tabId: properties.tabId, deltaY: { type: 'number' } })]
+  info('browser_inspect_element', true, properties), info('browser_click', false, properties), info('browser_scroll', false, { ...properties, deltaY: { type: 'number' } })]
 
 async function runFixture(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'sourcing-hybrid-'))
@@ -29,12 +29,14 @@ async function runFixture(options = {}) {
   const diagnostics = []
   const clicks = [], native = [], selected = new Set(options.selectedDegrees ?? [])
   const candidateName = options.name ?? '陈先生'
-  let activeName = candidateName, documentEpoch = 0, lastFormat, returnedFromDetail = false
+  let activeName = candidateName, documentEpoch = 0, lastFormat, returnedFromDetail = false, closingReads = 0
   const cardText = candidateName + ' 30岁 6年经验 本科 武汉 Java开发 工作经历：测试公司负责Java开发。'
+  const currentCardText = () => cardText + (options.cardChangesAfterScroll && scrollY > 0 ? ' 刚刚在线，回复更快。' : '')
   const resumeText = candidateName + ' 30岁 工作6年 武汉 本科 工作经历：在测试公司负责Java开发，开发订单服务和数据库维护。项目经历：Java开发订单管理系统，负责服务设计、接口维护、需求评审和代码检查。' + 'Java开发项目职责和技术经历。'.repeat(12)
   const detailText = () => (options.detailGreeting ? `推荐职位：\n${jobName}\n` : '') + resumeText.replaceAll(candidateName, activeName)
+    + (options.detailGreeting ? `\n${options.changingActivityHint && batches >= 2 ? 'Ta在线，回复更快～\n' : ''}立即沟通\n关闭` : '')
   const base = () => options.recommendTabs ? [
-    { ref: 'recommend-position', role: 'tab', name: jobName + (options.recommendBadge ? ' 高交付' : ''), elementId: 'rc-tabs-2-tab-83698185', states: positionApplied ? ['selected'] : [] },
+    { ref: 'recommend-position', role: 'tab', name: jobName + (options.recommendBadge ? ' 高交付' : ''), elementId: options.positionElementId === undefined ? 'rc-tabs-2-tab-83698185' : options.positionElementId, states: positionApplied ? ['selected'] : [] },
     { ref: 'recommend-city', role: 'combobox', tagName: 'div', name: '期望城市', value: '武汉', states: [] },
     { ref: 'recommend-education', role: 'button', name: '学历：本科及以上', states: [] },
     ...(options.exhausted ? [{ ref: 'recommend-end', role: 'text', name: '没有更多推荐人才', states: [] }] : []),
@@ -43,16 +45,18 @@ async function runFixture(options = {}) {
     ...(positionOpen ? [{ ref: 'job-option', role: 'StaticText', name: jobName, states: [] }, { ref: 'job-confirm', role: 'button', name: '确定', states: [] },
       { ref: 'wrong-confirm', role: 'button', name: '确定', states: [] }] : []), structuredClone(captured.city.item),
     ...degrees.map(d => ({ ...structuredClone(d.item), states: [] })), { ref: 'search', role: 'button', name: '搜索', states: [] }]
-  const card = () => [{ ref: 'root', role: 'div', name: cardText, states: [] },
-    { ref: 'name', role: 'StaticText', name: candidateName, parentRef: 'root', context: { text: cardText }, states: [] },
-    { ref: 'greet', role: 'button', name: '立即沟通', parentRef: 'root', context: { text: cardText }, states: [] },
-    ...(options.twoCandidates ? [{ ref: 'root2', role: 'div', name: cardText.replaceAll(candidateName, '李明'), states: [] },
-      { ref: 'name2', role: 'StaticText', name: '李明', parentRef: 'root2', context: { text: cardText.replaceAll(candidateName, '李明') }, states: [] },
-      { ref: 'greet2', role: 'button', name: '立即沟通', parentRef: 'root2', context: { text: cardText.replaceAll(candidateName, '李明') }, states: [] }] : [])]
+  const card = () => [{ ref: 'root', role: 'div', name: currentCardText(), states: [] },
+    { ref: 'name', role: 'StaticText', name: candidateName, parentRef: 'root', context: { text: currentCardText() }, states: [] },
+    { ref: 'greet', role: 'button', name: '立即沟通', parentRef: 'root', context: { text: currentCardText() }, states: [] },
+    ...(options.twoCandidates ? [{ ref: 'root2', role: 'div', name: currentCardText().replaceAll(candidateName, '李明'), states: [] },
+      { ref: 'name2', role: 'StaticText', name: '李明', parentRef: 'root2', context: { text: currentCardText().replaceAll(candidateName, '李明') }, states: [] },
+      { ref: 'greet2', role: 'button', name: '立即沟通', parentRef: 'root2', context: { text: currentCardText().replaceAll(candidateName, '李明') }, states: [] }] : [])]
+    .map(item => options.offscreenCandidate ? { ...item, bounds: { x: 600, y: (item.ref.endsWith('2') ? 150 : 1000) - scrollY, width: 150, height: 25 } } : item)
   const page = () => ({ tabId: 1, snapshotId: `s${revision}`, documentId: options.renewDocument ? `doc-${documentEpoch}` : 'doc', format: 'dom', url: entryUrl,
     viewport: { width: 1440, height: 704, scrollY },
     items: detail ? [{ ref: 'dialog', role: 'dialog', name: detailText().slice(0, 200), dialogRef: 'dialog', states: [] },
-      ...(options.detailGreeting ? [{ ref: 'greet', role: 'button', name: '立即沟通', context: { text: detailText() }, dialogRef: 'dialog', states: [] }] : []),
+      ...(options.detailGreeting ? [{ ref: 'greet', role: 'button', name: '立即沟通', ...(options.parentOwnedGreeting ? {} : { context: { text: detailText() } }),
+        ...(options.parentOwnedGreeting ? { parentRef: 'dialog' } : { dialogRef: 'dialog' }), states: [] }] : []),
       { ref: 'close', role: 'img', name: 'close', dialogRef: 'dialog', states: [] }] : [...base(), ...(options.exhausted ? [] : card())],
     dialogs: detail ? [{ ref: 'dialog', text: detailText() }] : [] })
   const call = async (name, args) => {
@@ -61,7 +65,8 @@ async function runFixture(options = {}) {
     if (name === 'browser_list_tabs') return { tabs: [{ tabId: 1, url: entryUrl }] }
     if (name === 'browser_snapshot') {
       lastFormat = args.format
-      if (options.recoverFromList && !listFailureRaised && args.format === 'dom' && args.viewportOnly === false) {
+      if (closingReads && --closingReads === 0) detail = false
+      if (options.recoverFromList && revision > 0 && !detail && !listFailureRaised && args.format === 'dom' && args.viewportOnly === true) {
         listFailureRaised = true
         throw Error('SOURCING_HANDOFF: list_no_progress')
       }
@@ -71,9 +76,18 @@ async function runFixture(options = {}) {
       if (!detail && options.delayedResults && ++resultSnapshots <= 2) snapshot.items = base()
       return snapshot
     }
-    if (name === 'browser_scroll') { scrollY = Math.max(0, scrollY + args.deltaY); revision++; return { dispatched: true, snapshot: page() } }
+    if (name === 'browser_scroll') {
+      if (options.offscreenCandidate && args.deltaY > 0) assert.equal(args.ref, 'greet2', 'scroll inside the observed visible candidate list')
+      scrollY = Math.max(0, scrollY + args.deltaY); revision++; return { dispatched: true, snapshot: page() }
+    }
     assert.equal(args.snapshotId, page().snapshotId)
     if (name === 'browser_inspect_element') {
+      if (options.stableResumeIds && !detail && ['root', 'name', 'greet', 'root2', 'name2', 'greet2'].includes(args.ref)) {
+        const id = args.ref.endsWith('2') ? 'observedResume456'
+          : options.changedResumeIdAfterScroll && scrollY > 0 ? 'differentResume789' : 'observedResume123'
+        return { item: page().items.find(i => i.ref === args.ref), element: { tagName: 'span', visible: true },
+          ancestors: [{ attributes: { class: `xpath-resume-item-wrap xpath-resume-item-wrap-${id}` } }] }
+      }
       if (args.ref === captured.position.item.ref || args.ref === 'nested-position') { const copy = structuredClone(captured.position.inspection); copy.element.visible = scrollY === 0; copy.item.name = positionApplied ? jobName : '不限职位';
         copy.item.ref = args.ref
         if (args.ref === 'nested-position' && !options.separatePosition) copy.item.parentRef = captured.position.item.ref
@@ -103,8 +117,12 @@ async function runFixture(options = {}) {
         assert.equal(args.policy.riskLevel, 'business_write')
         if (options.greetingError) throw Error(options.greetingError)
       }
-      if (args.ref === 'name' || args.ref === 'name2') { if (options.openError) throw Error(options.openError); detail = true; activeName = args.ref === 'name' ? candidateName : '李明'; documentEpoch++ }
-      if (args.ref === 'close') { if (options.closeError) throw Error(options.closeError); detail = false; returnedFromDetail = true; if (options.domFilterRowsMissing) lastFormat = 'semantic' }
+      if (args.ref === 'name' || args.ref === 'name2') {
+        if (options.openError) throw Error(options.openError)
+        if (options.openFailsOnce && !options._openFailed) { options._openFailed = true; throw Error('ELEMENT_NOT_IN_VIEWPORT') }
+        detail = true; activeName = args.ref === 'name' ? candidateName : '李明'; documentEpoch++
+      }
+      if (args.ref === 'close') { if (options.closeError) throw Error(options.closeError); closingReads = options.closeDelaySnapshots ?? 0; detail = closingReads > 0; returnedFromDetail = true; if (options.domFilterRowsMissing) lastFormat = 'semantic' }
       const d = degrees.find(d => d.item.ref === args.ref)
       if (d) selected.has(d.item.name) ? selected.delete(d.item.name) : selected.add(d.item.name)
       revision++; return { dispatched: true, snapshot: page() }
@@ -113,7 +131,43 @@ async function runFixture(options = {}) {
   }
   const agent = async opts => {
     if (opts.tools[0]?.name !== 'sourcing_submit_assessments') {
+      const collect = opts.tools.find(tool => tool.name === 'sourcing_collect')
+      try {
+        await collect.execute({}, opts.signal)
+        if (opts.isComplete()) return { status: 'completed', message: 'collected', turns: 1, modelMs: 0, toolMs: 0 }
+      } catch (error) {
+        if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error))) throw error
+        await collect.recover(error, {}, opts.signal)
+      }
       fallbackCalls++
+      if (options.openFailsOnce) {
+        const execute = (name, args) => opts.tools.find(t => t.name === name).execute(args, opts.signal)
+        const recovery = await collect.recover(Error('SOURCING_HANDOFF'), {}, opts.signal)
+        const selected = recovery.hostState.selectedCandidate
+        assert.equal(selected.name, candidateName)
+        assert.equal(selected.platformIdentity.id, 'observedResume123')
+        assert.equal(selected.resumeCharacters, 0)
+        assert.equal(selected.stage, 'selected')
+        assert.match(selected.verifiedListText, /Java开发/)
+        assert.equal(recovery.hostState.candidateKey, selected.candidateKey)
+        assert.match(recovery.next, /不要再次选择/)
+        const select = opts.tools.find(t => t.name === 'sourcing_select_candidate')
+        const repeat = await execute(select.name, { tabId: 1, snapshotId: page().snapshotId, name: candidateName, ref: 'greet', evidenceRefs: ['name'] })
+        assert.equal(repeat.alreadySelected, true)
+        assert.equal(repeat.candidateKey, selected.candidateKey)
+        assert.equal(batches, 1, 'resuming the selected candidate must not reassess or count it again')
+        const wrong = { tabId: 1, snapshotId: page().snapshotId, name: '李明', ref: 'greet2', evidenceRefs: ['name2'] }
+        await assert.rejects(execute(select.name, wrong), /TASK_RESULT_REQUIRED/)
+        const correction = await select.recover(Error('TASK_RESULT_REQUIRED'), wrong, opts.signal)
+        assert.equal(correction.selectedCandidate.candidateKey, selected.candidateKey)
+        assert.equal(correction.selectedCandidate.resumeCharacters, 0)
+        await execute('browser_click', { tabId: 1, snapshotId: page().snapshotId, ref: 'name', purpose: 'navigation' })
+        const saved = await execute('sourcing_record_candidate', { tabId: 1, snapshotId: page().snapshotId, identityRef: 'dialog', resumeRefs: ['dialog'], scope: 'online' })
+        await execute('sourcing_greet_candidate', { tabId: 1, snapshotId: page().snapshotId, candidateKey: saved.candidateKey,
+          ref: 'greet', identityRef: 'dialog', evidenceRefs: [], position: { ref: 'dialog' } })
+        assert.equal(opts.isComplete(), true)
+        return { status: 'completed', message: 'recovered selected candidate', turns: 3, modelMs: 0, toolMs: 0 }
+      }
       if (options.recoverFromList) {
         const execute = (name, args) => opts.tools.find(t => t.name === name).execute(args, opts.signal)
         if (sourceMode === 'recommend') {
@@ -140,7 +194,8 @@ async function runFixture(options = {}) {
     batches++
     await opts.tools[0].execute({ candidates: opts.goal.candidates.map(s => ({ sourceId: s.sourceId, ...(opts.goal.mode === 'detail' ? { fields: [{ label: '学历', value: '本科' }, ...(options.ungroundedSalary ? [{ label: '期望薪资', value: '30-50K' }] : [])] } : {}),
       ...(opts.goal.candidateFilters ? { filterAssessments: Object.keys(opts.goal.candidateFilters).map(field => ({ field, state: options.filterState ?? 'match', evidenceId: options.filterState === 'unknown' ? null : 0, reason: 'Candidate source evidence' })) } : {}),
-      assessments: [{ criterionId: 'java', state: options.lowScore ? 'unknown' : 'match', evidenceId: options.lowScore ? null : 0, reason: '原文明确列出Java开发' }] })) }, opts.signal)
+      ...(opts.goal.mode === 'preview' ? { listAssessments: opts.goal.listCriteria.map(c => ({ field: c.field, state: options.lowScore ? 'unknown' : options.filterState ?? 'match', evidenceId: options.lowScore || options.filterState === 'unknown' ? null : 0, reason: '原文证据' })) }
+        : { assessments: [{ criterionId: 'java', state: options.lowScore ? 'unknown' : 'match', evidenceId: options.lowScore ? null : 0, reason: '原文明确列出Java开发' }] }) })) }, opts.signal)
     return { status: 'completed', message: 'done', turns: 1, modelMs: 10, toolMs: 1 }
   }
   const executor = new SourcingAgent(store, call, async () => {}, async () => infos, () => agent, async () => ({
@@ -149,9 +204,9 @@ async function runFixture(options = {}) {
     options.recommendTabs ? { loadPlatformJobs: async () => [{ id: '83698185', name: jobName }] } : {})
   const controller = new AbortController()
   try {
-    const job = executor.create({ id: '32cfb184-78bc-4817-aa0b-4f6da48fc942', jobId: 'job', platforms: ['liepin'], sourceMode, limit: options.twoCandidates ? 2 : 1, minimumScore: 40, autoGreet: !!options.autoGreet, confirmed: true })
+    const job = executor.create({ id: '32cfb184-78bc-4817-aa0b-4f6da48fc942', jobId: 'job', platforms: ['liepin'], sourceMode, limit: options.limit ?? (options.twoCandidates ? 2 : 1), minimumScore: 40, autoGreet: !!options.autoGreet, confirmed: true })
     await executor.prepare(job, controller.signal)
-    job.requirements = { keyword: 'Java', criteria }
+    job.requirements = { keyword: 'Java', listCriteria: [{ field: 'education', requirement: '本科', quote: '本科' }], criteria }
     await executor.run(job, controller.signal)
     return { job, diagnostics, clicks, native, batches, fallbackCalls, released, selected: [...selected], greetingClicks, scrollY }
   } finally { await rm(dir, { recursive: true, force: true }) }
@@ -211,9 +266,9 @@ test('unknown detail click cannot hand off or create a candidate, and releases e
   assert.equal(f.released, true)
 })
 
-test('platform configuration and drivers are selected in the registry, unknown BOSS sourcing uses AI', () => {
+test('each platform registers its own fixed driver before generic recovery', () => {
   assert.equal(typeof recruitmentPlatform('liepin').createSourcingDriver, 'function')
-  assert.equal(recruitmentPlatform('boss').createSourcingDriver, undefined)
+  assert.equal(typeof recruitmentPlatform('boss').createSourcingDriver, 'function')
   assert.equal(recruitmentPlatform('boss').sourcingEntry, 'https://www.zhipin.com/web/chat/recommend')
   for (const path of ['../src/lib/sourcing-agent.ts', '../src/lib/sourcing/session.ts', '../src/lib/sourcing/fast-runner.ts', '../src/lib/sourcing-greeting.ts']) {
     assert.doesNotMatch(readFileSync(new URL(path, import.meta.url), 'utf8'), /channel\.platform === ['"](?:liepin|boss)|https:\/\/lpt\.liepin|LIEPIN_POSITION_ROUTE|new Liepin/)
@@ -230,7 +285,8 @@ test('nested name markup is one entry, while identical masked names on different
       { ref: `action${n}`, parentRef: `action-wrap${n}`, role: 'button', name: '立即沟通', context: { text } }]
   })
   const page = { tabId: 1, snapshotId: 's', url: 'https://lpt.liepin.com/search', format: 'dom', items }
-  const broker = { currentPage: () => page, tools: [{ name: 'browser_snapshot', execute: async () => page }] }
+  const broker = { currentPage: () => page, inspectRefs: async () => {}, getInspection: () => undefined,
+    tools: [{ name: 'browser_snapshot', execute: async () => page }] }
   const driver = new LiepinSourcingDriver({ broker, job: { sourceMode: 'search' }, signal: new AbortController().signal })
   const cards = await driver.cards()
   assert.equal(cards.length, 2)
@@ -245,6 +301,36 @@ test('viewport clipping does not separate candidate name from its card identity'
   assert.equal(f.job.status, 'completed', f.job.detail)
   assert.equal(f.fallbackCalls, 0)
   assert.equal(f.job.candidates.length, 1)
+})
+
+test('only the visible recommendation is selected while an earlier DOM card remains offscreen', async () => {
+  const f = await runFixture({ sourceMode: 'recommend', recommendTabs: true, autoGreet: true, detailGreeting: true,
+    stableResumeIds: true, offscreenCandidate: true, cardChangesAfterScroll: true, twoCandidates: true, limit: 1 })
+  assert.equal(f.job.status, 'completed', f.job.detail + JSON.stringify(f.diagnostics.filter(row => row.event.includes('fast_navigation') || row.event.includes('rejected'))))
+  assert.equal(f.fallbackCalls, 0)
+  assert.equal(f.job.scanned, 1)
+  assert.equal(f.job.candidates[0].platformIdentity.id, 'observedResume456')
+  assert.deepEqual(f.clicks, ['name2', 'greet'])
+})
+
+test('a selected candidate survives a failed detail open, repeat selection and correction without a second preflight', async () => {
+  const f = await runFixture({ sourceMode: 'recommend', recommendTabs: true, autoGreet: true, detailGreeting: true,
+    stableResumeIds: true, openFailsOnce: true, twoCandidates: true, limit: 1 })
+  assert.equal(f.job.status, 'completed', f.job.detail)
+  assert.equal(f.fallbackCalls, 1)
+  assert.equal(f.job.scanned, 1)
+  assert.equal(f.job.candidates.length, 1)
+  assert.equal(f.job.candidates[0].platformIdentity.id, 'observedResume123')
+  assert.equal(f.greetingClicks, 1)
+})
+
+test('a list containing only offscreen candidates never opens or greets them', async () => {
+  const f = await runFixture({ sourceMode: 'recommend', recommendTabs: true, autoGreet: true, detailGreeting: true,
+    stableResumeIds: true, offscreenCandidate: true, limit: 1 })
+  assert.equal(f.job.status, 'stopped')
+  assert.equal(f.job.candidates.length, 0)
+  assert.equal(f.greetingClicks, 0)
+  assert.equal(f.clicks.includes('name'), false)
 })
 
 test('unmasked names and asynchronous results use the same verified fast path', async () => {
@@ -351,7 +437,7 @@ test('returning from a recommended resume renews the position proof and uses no 
   assert.deepEqual(f.clicks, ['name', 'close', 'name2'])
 })
 
-test('a real-style job tab badge does not turn an ID-verified recommendation position into an unknown job', async () => {
+test('a captured job tab badge preserves name-based recommendation selection', async () => {
   const f = await runFixture({ sourceMode: 'recommend', recommendTabs: true, recommendBadge: true })
   assert.equal(f.job.status, 'completed', f.job.detail)
   assert.equal(f.fallbackCalls, 0)
@@ -367,10 +453,59 @@ test('verified recommendation detail greets without first closing an occluded de
  assert.deepEqual(f.clicks,['name','greet'])
  assert.equal(f.job.greetings[0].stage,'succeeded')
 })
+test('the fast path rereads a changed detail hint and greets through its parent-owned button without closing first',async()=>{
+ const f=await runFixture({sourceMode:'recommend',recommendTabs:true,autoGreet:true,detailGreeting:true,changingActivityHint:true,parentOwnedGreeting:true,stableResumeIds:true,closeError:'ELEMENT_OCCLUDED'})
+ assert.equal(f.job.status,'completed',f.job.detail)
+ assert.equal(f.fallbackCalls,0)
+ assert.equal(f.greetingClicks,1)
+ assert.deepEqual(f.clicks,['name','greet'])
+ assert.equal(f.job.candidates[0].resumeText.split('工作经历').length-1,1)
+ assert.match(f.job.candidates[0].resumeText,/Ta在线，回复更快～/)
+ assert.equal(f.job.candidates[0].platformIdentity.id,'observedResume123')
+ assert.equal(f.job.greetings[0].platformIdentity.id,'observedResume123')
+ assert.equal(f.job.greetings[0].stage,'succeeded')
+})
+test('two reread recommendations greet in their own details and return to the list only between candidates',async()=>{
+ const f=await runFixture({sourceMode:'recommend',recommendTabs:true,autoGreet:true,detailGreeting:true,changingActivityHint:true,twoCandidates:true,renewDocument:true})
+ assert.equal(f.job.status,'completed',f.job.detail)
+ assert.equal(f.fallbackCalls,0)
+ assert.equal(f.greetingClicks,2)
+ assert.deepEqual(f.clicks,['name','greet','close','name2','greet'])
+ assert.equal(f.job.candidates.length,2)
+ for(const candidate of f.job.candidates) assert.equal(candidate.resumeText.split('工作经历').length-1,1)
+ assert.ok(f.job.greetings.every(row=>row.stage==='succeeded'))
+})
 test('unknown result from a foreground detail greeting still stops without replay',async()=>{
  const f=await runFixture({sourceMode:'recommend',recommendTabs:true,autoGreet:true,detailGreeting:true,greetingError:'TOOL_CALL_OUTCOME_UNKNOWN'})
  assert.equal(f.job.status,'unknown',f.job.detail)
  assert.equal(f.greetingClicks,1)
  assert.equal(f.job.greetings[0].stage,'unknown')
  assert.equal(f.fallbackCalls,0)
+})
+
+
+test('Liepin fixed position switch survives removed, changed and misleading widget IDs without navigation inference', async () => {
+  for (const positionElementId of [null, 'changed-widget', 'rc-tabs-987-tab-999']) {
+    const f = await runFixture({ sourceMode: 'recommend', recommendTabs: true, unselectedPosition: true, positionElementId })
+    assert.equal(f.job.status, 'completed', f.job.detail)
+    assert.equal(f.fallbackCalls, 0)
+    assert.deepEqual(f.clicks, ['recommend-position', 'name'])
+  }
+})
+
+
+test('a delayed resume close settles with read-only snapshots and a single close click before collecting the next card', async () => {
+  const f = await runFixture({ sourceMode: 'recommend', recommendTabs: true, twoCandidates: true, closeDelaySnapshots: 2 })
+  assert.equal(f.job.status, 'completed', f.job.detail)
+  assert.equal(f.job.candidates.length, 2)
+  assert.equal(f.fallbackCalls, 0)
+  assert.deepEqual(f.clicks, ['name', 'close', 'name2'])
+})
+
+test('unknown resume close dispatch is never waited out, clicked twice or recovered by navigation', async () => {
+  const f = await runFixture({ sourceMode: 'recommend', recommendTabs: true, twoCandidates: true, closeError: 'TOOL_CALL_OUTCOME_UNKNOWN' })
+  assert.equal(f.job.status, 'unknown', f.job.detail)
+  assert.equal(f.job.candidates.length, 1)
+  assert.equal(f.fallbackCalls, 0)
+  assert.deepEqual(f.clicks, ['name', 'close'])
 })

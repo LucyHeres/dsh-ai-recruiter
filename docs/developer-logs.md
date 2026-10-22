@@ -15,7 +15,7 @@
 默认 `info` 级别即可通过任务记录中的“复制操作日志”取得以下事件：
 
 - `sourcing.navigation_rejected`：被拒操作的工具、ref、快照、拒绝阶段、元素角色/标签/状态、有限祖先结构和与当前候选人的文本关系。`inputDispatched=false` 表示宿主尚未派发该输入。`controlTerms` 只保留固定界面诊断词；未知文案只记长度及 `targetLabelKey` 指纹，不记原文。候选人关系仅表示快照文字关联，不代表通过身份校验或获准点击。
-- `sourcing.candidate_preflight`：初筛分数、证据覆盖率、本轮最低分门槛（默认 60 分），以及 `qualified`、`skip_low_score` 或 `duplicate` 的实际决定。
+- `sourcing.candidate_preflight`：列表条件符合率、符合项数 `matchedCount`、要求项数 `requiredCount`、逐项状态，以及 `qualified`、`skip_conditions`、`skip_unverified` 或 `duplicate` 的实际决定；只有所有已要求条件完全符合才通过，不使用详情最低分门槛。
 - `sourcing.assessment_rejected`：评分失败代码、原文长度，以及每项引用是否提供、是否出现在已采集原文中。不包含引用、分析理由或简历正文。
 - `sourcing.resume_read`：已读取字数、来源为列表摘要还是在线履历，以及 `saved=false`，避免把“读到了”误认为“已保存”。
 - `sourcing.candidate_recorded` / `sourcing.candidate_discarded`：分别表示已保存的人选和最终评分不足本轮最低分而丢弃的信息。

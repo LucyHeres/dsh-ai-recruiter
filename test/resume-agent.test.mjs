@@ -123,7 +123,7 @@ test('complete legacy card identity avoids redundant candidate inspection but no
 test('hidden, invisible and modal-background identities remain ineligible and failures explain the offending ref', async () => {
   for (const state of ['hidden', 'invisible', 'blocked_by_dialog']) {
     const out = await fixture([[snapshot], [select], request => {
-      const errors = request.messages.flatMap(message => message.content).filter(block => block.type === 'tool-result' && block.isError)
+      const errors = request.messages.filter(message => message.role === 'tool' && message.isError)
       const result = JSON.parse(errors.at(-1).content[0].text)
       assert.match(result.error.message, /CANDIDATE_EVIDENCE_UNREADABLE.*candidate/)
       assert.deepEqual(result.recovery.evidence[0].states, [state])
@@ -173,7 +173,7 @@ test('startup observation plus navigation observation completes a semantic impor
       && !message.source?.replayState && message.content.some(block => block.type === 'tool-call' && String(block.id).startsWith('host-startup-'))))
     return [select, { name: 'browser_navigate', args: { tabId: 1, url: `${origin}/detail` } }]
   }, request => {
-    const results = request.messages.flatMap(message => message.content).filter(block => block.type === 'tool-result')
+    const results = request.messages.filter(message => message.role === 'tool')
     assert.equal(JSON.parse(results.at(-1).content[0].text).snapshot.snapshotId, 's2')
     return [ingest()]
   }], { startupTabs: [{ tabId: 1, url: `${origin}/opaque` }], page: n => ({ ...page(n), format: 'semantic' }),
@@ -185,7 +185,7 @@ test('startup observation plus navigation observation completes a semantic impor
 
 test('task selection itself refreshes an expired ref without an extra model snapshot round', async () => {
   const out = await fixture([[snapshot], [{ ...select, args: { ...select.args, snapshotId: 'obsolete' } }], request => {
-    const results = request.messages.flatMap(message => message.content).filter(block => block.type === 'tool-result')
+    const results = request.messages.filter(message => message.role === 'tool')
     assert.equal(JSON.parse(results.at(-1).content[0].text).recovery.snapshot.snapshotId, 's2')
     return [{ ...select, args: { ...select.args, snapshotId: 's2' } }, ingest()]
   }])
@@ -205,7 +205,7 @@ test('new snapshots and refs cannot reset repeated candidate identity failure', 
 test('ordinary native tool failure returns to the same model loop for a new decision', async () => {
   const out = await fixture([[snapshot], [select, navigate], request => {
     assert.match(JSON.stringify(request.messages), /ELEMENT_OCCLUDED/)
-    const error = request.messages.flatMap(message => message.content).findLast(block => block.type === 'tool-result' && block.isError)
+    const error = request.messages.findLast(message => message.role === 'tool' && message.isError)
     assert.equal(JSON.parse(error.content[0].text).recovery.snapshot.snapshotId, 's2')
     return [ingest()]
   }], { navigationError: 'ELEMENT_OCCLUDED' })
