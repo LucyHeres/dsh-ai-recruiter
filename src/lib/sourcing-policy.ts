@@ -3,18 +3,24 @@ import { hash } from './store.js'
 import { identityObservation, itemText, normalized, readableIdentityRef } from './page-actions.js'
 import type { AgentBrowserCall } from './agent-browser-tools.js'
 import type { SourcingAssessment, SourcingCandidate, SourcingCriterion, SourcingPosition, SourcingRequirements } from '../shared/sourcing.js'
+import { PLATFORM_KEYS } from '../shared/workbench.js'
 import { DEFAULT_MINIMUM_SCORE, SOURCING_MAX_BONUS, SOURCING_MAX_CRITERIA, SOURCING_RUBRIC_VERSION, sourcingCriterionScore, sourcingRubricScore } from '../shared/sourcing-score.js'
 import { supplementParts } from './sourcing/matching-skill.js'
 import { isSourcingFilterControl } from './sourcing-search.js'
 import { resumeDetailContent } from './resume-detail-identity.js'
+import { fixedSourcingFields } from './sourcing/requirement-policy.js'
 
 export const sourcingStartSpec = z.object({ id: z.string().uuid(), jobId: z.string().min(1).max(64),
   sourceMode: z.enum(['recommend', 'search']).default('recommend').describe('默认从人才推荐寻聘；只有用户明确要求主动搜索时才传 search，不能因推荐不足自动切换'),
-  platforms: z.array(z.enum(['liepin', 'boss'])).min(1).max(2).refine(rows => new Set(rows).size === rows.length).describe('仅从所选职位的 jobs[].platforms 中选择已对接同步的平台，不默认同时选择两个平台'),
+  platforms: z.array(z.enum(PLATFORM_KEYS)).min(1).max(PLATFORM_KEYS.length).refine(rows => new Set(rows).size === rows.length).describe('仅从所选职位的 jobs[].platforms 中选择已对接同步的平台，不默认同时选择两个平台'),
   minimumScore: z.number().int().min(0).max(100).default(DEFAULT_MINIMUM_SCORE), autoGreet: z.boolean().default(false), supplement: z.string().trim().max(4000).default(''), limit: z.number().int().min(1).max(50).describe('每个平台独立目标人数，例如选择两个平台、limit=5表示每平台5人，共10人'), confirmed: z.literal(true),
 }).strict()
-export const sourcingSource = (position: SourcingPosition, supplement: string) => [position.name, position.city, position.description, supplement].filter(Boolean).join('\n')
-export const sourcingVersion = (position: SourcingPosition, supplement: string) => hash({ listScreeningVersion: 1, rubricVersion: SOURCING_RUBRIC_VERSION, id: position.id, name: position.name, city: position.city, description: position.description, supplement })
+export const sourcingSource = (position: SourcingPosition, supplement: string) => {
+  const fixed = fixedSourcingFields(position)
+  return [position.name, position.city, position.description, ...Object.entries(fixed).filter(([, value]) => value)
+    .map(([field, value]) => `${({ city: '工作地点', experience: '工作经验', education: '学历要求' } as Record<string, string>)[field]}：${value}`), supplement].filter(Boolean).join('\n')
+}
+export const sourcingVersion = (position: SourcingPosition, supplement: string) => hash({ listScreeningVersion: 1, fixedFieldPriorityVersion: 1, rubricVersion: SOURCING_RUBRIC_VERSION, id: position.id, name: position.name, city: position.city, description: position.description, basicRequirements: position.basicRequirements, searchFields: position.searchFields, supplement })
 export function validateCriteria(criteria: SourcingCriterion[], source: string) {
   const tiered = criteria.some(row => row.tier !== undefined)
   if (criteria.length < 1 || criteria.length > (tiered ? SOURCING_MAX_CRITERIA : 8) || new Set(criteria.map(row => row.id)).size !== criteria.length) throw new Error('匹配维度须唯一且数量在允许范围内')
@@ -68,7 +74,7 @@ const blockedControl = /沟通|打招呼|开聊|发送|联系|索要|交换|购�
 const searchField = /搜索|搜人才|关键词|关键字|职位|城市|地区|地点|经验|学历|薪资|行业|职能|search|keyword/i
 /** The model chooses navigation from observed semantics. Code rejects business
  * writes and unsafe input; website-specific positive button lists do not gate clicks. */
-export function assertSourcingNavigation(call: AgentBrowserCall, page: any, selectedName?: string, focusedSearch = false, positionControl = false) {
+export function assertSourcingNavigation(call: AgentBrowserCall, page: any, selectedName?: string, focusedSearch = false, positionControl = false, platformReadOnlyControl = false) {
   if (call.readOnly) return
   if (call.purpose === 'business_write') throw new Error('SOURCING_READ_ONLY: 寻聘不能沟通、购买或修改业务数据')
   if (['browser_scroll', 'browser_wait', 'browser_open_tab', 'browser_navigate', 'browser_history'].includes(call.name)) return
@@ -82,6 +88,7 @@ export function assertSourcingNavigation(call: AgentBrowserCall, page: any, sele
   const item = readableIdentityRef(page, String(call.args.ref || ''))
   const label = normalized(item.name), text = normalized([item.name, item.description, item.placeholder,
     typeof item.context?.text === 'string' && item.context.text.length <= 300 ? item.context.text : ''].filter(Boolean).join(' '))
+  if (platformReadOnlyControl && ['browser_click', 'browser_hover'].includes(call.name)) return
   if (blockedControl.test(label)) throw new Error('SOURCING_READ_ONLY: 该控件不属于只读寻聘')
   const closing = /^(关闭|返回|取消|×|close|cancel|back)$/i.test(label)
   const dialog = page?.dialogs?.find((row: any) => row.ref === item.dialogRef)

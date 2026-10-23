@@ -1,6 +1,6 @@
 import { recruiterMessageSource as source } from './llm-message-source.js'
 import { BlockAssembler, createAssistantMessage, createToolResultMessage, createUserMessage,
-  type GenerateOptions, type Message, type StreamChunk, type ToolCallBlock, type ToolSchema } from '@deepseek-ai/dsh-llm'
+  type GenerateOptions, type ImageBlock, type Message, type StreamChunk, type ToolCallBlock, type ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { DeveloperLog } from './developer-log.js'
 import { browserFailureReason } from './browser-errors.js'
 
@@ -24,6 +24,9 @@ export type BrowserAgentTool = {
 }
 export type BrowserAgentSeed = { name: string; args: Record<string, unknown>; value: unknown; isError?: boolean }
 export type BrowserAgentOptions = {
+  /** Host-admitted visual evidence, never embedded in goal/tool JSON or logs. */
+  inputImages?: readonly { data: Uint8Array; mediaType: 'image/png'; name?: string }[]
+  imageAttachments?: readonly ImageBlock[]
   system: string
   goal: Record<string, unknown>
   tools: BrowserAgentTool[]
@@ -89,6 +92,7 @@ export async function runBrowserAgent(llm: Llm, route: Route, options: BrowserAg
   const maxOutputTokens = options.maxOutputTokens ?? 4096
   let turns = 0, modelMs = 0, toolMs = 0
   const result = (status: BrowserAgentResult['status'], message: string): BrowserAgentResult => ({ status, message, turns, modelMs, toolMs })
+  if (options.inputImages?.length) return result('stopped', 'BROWSER_AGENT_IMAGE_ADMISSION_REQUIRED: 图片必须先经过宿主附件服务，不能静默降级为文本请求')
   if (!Number.isInteger(maxTurns) || maxTurns < 1 || !Number.isFinite(maxDurationMs) || maxDurationMs <= 0 || !Number.isFinite(modelTurnTimeoutMs) || modelTurnTimeoutMs <= 0
     || !Number.isInteger(maxOutputTokens) || maxOutputTokens < 256 || maxOutputTokens > 8192) return result('stopped', 'BROWSER_AGENT_BUDGET_INVALID')
   const deadline = new AbortController(), budgetError = failure('BROWSER_AGENT_DURATION_BUDGET')
@@ -142,7 +146,7 @@ export async function runBrowserAgent(llm: Llm, route: Route, options: BrowserAg
     } catch {}
   }
   try {
-    const initial = user(encoded(options.goal))
+    const initial = createUserMessage({ source, content: [{ type: 'text', text: encoded(options.goal) }, ...(options.imageAttachments ?? [])] })
     // 宿主侧已执行的调用只能作为「宿主事实」注入，绝不能伪造成 assistant 轮次：
     // 思考模式下服务端要求带工具调用的 assistant 消息必须附回它自己的 thinking，
     // 而宿主种子没有 thinking（不是模型产生的），于是整轮请求被

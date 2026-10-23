@@ -1,6 +1,7 @@
 import { itemText, normalized, readableIdentityRef, statesOf } from './page-actions.js'
-import { distinctPositionControls, positionBusinessIds, positionControl, positionNameMatches, samePositionComponent } from './position-controls.js'
-import type { GreetingJob } from '../shared/workbench.js'
+import { distinctPositionControls, positionBusinessIds, positionControl, positionNameMatches, samePositionComponent, type PositionTitleAlias } from './position-controls.js'
+import type { GreetingJob, Platform } from '../shared/workbench.js'
+import { platformDefinition } from './platforms/catalog.js'
 
 export interface PositionEvidence { ref: string; quote?: string; platformJobId?: string }
 /** exact adds observed business-ID corroboration; degraded verifies a unique
@@ -31,7 +32,12 @@ function selectedControl(page: any, item: any): boolean {
   return (page.items ?? []).filter((row: any) => positionControl(page, row) && normalized(row.name) === normalized(item.name)).length === 1
 }
 
-export function verifyPositionEvidence(page: any, job: Pick<GreetingJob, 'jobId' | 'jobName' | 'platformJobs'>, evidence?: PositionEvidence): PositionOutcome {
+/** 标题后缀由平台声明；调用方没传时按 job.platform 解析。 */
+function positionAliasOf(job: { platform?: Platform }, alias?: PositionTitleAlias): PositionTitleAlias | undefined {
+  return alias ?? (job.platform ? platformDefinition(job.platform).positionAlias : undefined)
+}
+export function verifyPositionEvidence(page: any, job: Pick<GreetingJob, 'jobId' | 'jobName' | 'platformJobs'> & { platform?: Platform }, evidence?: PositionEvidence,
+  alias?: PositionTitleAlias): PositionOutcome {
   if (!job.jobId) return ok(evidence?.ref ?? '', '', undefined, 'exact', '未选择薪人薪事职位，无需核验')
   const fail = (error: string): PositionOutcome => ({ ok: false, error })
   if (!evidence?.ref || !job.jobName) return fail('缺少 position 或目标职位名称')
@@ -40,7 +46,8 @@ export function verifyPositionEvidence(page: any, job: Pick<GreetingJob, 'jobId'
   if (!quote || !text.includes(quote)) return fail('position.quote 未在所引元素的 name/context.text 中逐字出现')
   if (!positionControl(page, item)) return fail('所引元素不属于可读招聘职位控件')
   const targets = job.platformJobs?.length ? job.platformJobs : [{ id: '', name: job.jobName }]
-  const matching = targets.filter(target => positionNameMatches(page, item, target.name))
+  const titleAlias = positionAliasOf(job, alias)
+  const matching = targets.filter(target => positionNameMatches(page, item, target.name, titleAlias))
   if (!matching.length) return fail('所引职位名称与目标职位不一致')
   if (evidence.platformJobId && job.platformJobs?.length && !matching.some(target => target.id === evidence.platformJobId)) {
     return fail('position.platformJobId 不属于名称匹配的目标平台职位')
@@ -48,7 +55,7 @@ export function verifyPositionEvidence(page: any, job: Pick<GreetingJob, 'jobId'
   if (!selectedControl(page, item)) return fail('所引职位没有选中状态；URL 或展开选项不能代替当前职位')
 
   const namedControls = (page.items ?? []).filter((candidate: any) => positionControl(page, candidate)
-    && matching.some(target => positionNameMatches(page, candidate, target.name)))
+    && matching.some(target => positionNameMatches(page, candidate, target.name, titleAlias)))
   const claimants = distinctPositionControls(page, namedControls.filter((candidate: any) => selectedControl(page, candidate)))
   if (claimants.length !== 1 || !samePositionComponent(page, claimants[0], item)) return fail(`当前页面有 ${claimants.length} 个控件同时声称选中了目标职位，无法确定发送职位`)
   const ids = [...new Set([...positionBusinessIds(page), ...positionBusinessIds(page, item)])]
@@ -67,12 +74,12 @@ function ok(ref: string, quote: string, platformJobId: string | undefined, level
   return { ok: true, verification: { ref, quote, ...(platformJobId ? { platformJobId } : {}), level, reason } }
 }
 
-export function findPositionEvidence(page: any, job: GreetingJob): PositionVerification[] {
+export function findPositionEvidence(page: any, job: GreetingJob, alias?: PositionTitleAlias): PositionVerification[] {
   const found: PositionVerification[] = []
   for (const item of page.items ?? []) {
     if (!positionControl(page, item)) continue
     try {
-      const result = verifyPositionEvidence(page, job, { ref: item.ref })
+      const result = verifyPositionEvidence(page, job, { ref: item.ref }, alias)
       if (result.ok) found.push(result.verification)
     } catch { /* A stale or unreadable element cannot establish position. */ }
   }

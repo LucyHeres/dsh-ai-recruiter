@@ -11,6 +11,7 @@ import { communicationLabels, communicationState, greetingLabel, greetingDetail,
 import { DEFAULT_MINIMUM_SCORE, sourcingMinimumScore, sourcingCriterionScore, sourcingTotalTarget, sourcingTierLabels } from '../../shared/sourcing-score.js'
 import { recruitmentPlatformForChannel, recruitmentPublishedChannels, sourcingPlatformsForChannels } from '../../shared/published-channels.js'
 import { renderPlatformTag } from '../components/platform-tag.js'
+import { defaultSourcingSettings, type SourcingSettings } from '../../shared/sourcing-settings.js'
 
 type Rpc = <T>(method: string, request?: unknown, signal?: AbortSignal) => Promise<T>
 const stamp = (s: string) => new Date(s).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -18,11 +19,13 @@ const roundStamp = (s: string) => new Date(s).toLocaleString('zh-CN', { year: 'n
 const primaryField = (label: string) => /职位|岗位|公司|企业/.test(label)
 const states = { queued: '等待执行', running: '寻聘中', stopping: '停止中', completed: '本轮完成', stopped: '已停止', failed: '未完成', unknown: '已停止' }
 const matches = { match: '符合', partial: '部分符合', mismatch: '明确不符', unknown: '待核实' }
-const phases: Record<string, string> = { preparing: '正在整理职位要求', searching: '正在准备推荐人才', reading: '正在读取候选人简历', evaluating: '正在评估匹配度', greeting: '正在核对身份并打招呼' }
+const phases: Record<string, string> = { connecting: '正在连接浏览器扩展', preparing: '正在整理职位要求', searching: '正在准备推荐人才', reading: '正在读取候选人简历', evaluating: '正在评估匹配度', greeting: '正在核对身份并打招呼' }
 const channelStates = { queued: '等待中', running: '寻聘中', completed: '已完成', stopped: '已停止', failed: '未完成' }
 type CandidateFilters = { score: string; communication: string; received: string; platform: string }
 type TalentNotice = { message: string; error?: boolean }
 const emptyFilters: CandidateFilters = { score: 'all', communication: 'all', received: 'all', platform: 'all' }
+/** Result toasts carry a full sync summary; keep them readable before auto-dismiss. */
+const NOTICE_DURATION_MS = 6000
 
 function SourcingLoadingDots() {
   return <span className="air-sourcing-loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
@@ -69,6 +72,8 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   const communicationRequest = useRef<AbortController>()
   const downloadRequest = useRef<AbortController>()
   const uploadRequest = useRef<AbortController>()
+  const settingsJobId = useRef(jobId)
+  settingsJobId.current = jobId
   const filterMenu = useRef<HTMLDetailsElement>(null), feedbackMenu = useRef<HTMLDetailsElement>(null), attachmentMenu = useRef<HTMLDetailsElement>(null)
   useEffect(() => {
     setCommunicationNotice(undefined); setSyncingCommunication(false); setStartingUpload(false); setDownloading('')
@@ -76,7 +81,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   }, [jobId])
   useEffect(() => {
     if (!communicationNotice) return
-    const timer = setTimeout(() => setCommunicationNotice(current => current === communicationNotice ? undefined : current), 3000)
+    const timer = setTimeout(() => setCommunicationNotice(current => current === communicationNotice ? undefined : current), NOTICE_DURATION_MS)
     return () => clearTimeout(timer)
   }, [communicationNotice])
   useEffect(() => {
@@ -105,7 +110,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   useEffect(() => {
     setPlatforms(previous => {
       const retained = previous.filter(platform => availablePlatforms.includes(platform))
-      return retained.length ? retained : availablePlatforms
+      return retained.length || !previous.length ? retained : availablePlatforms
     })
   }, [jobId, position?.id, availablePlatforms.join(',')])
   useEffect(() => { if (positionId && positionId !== jobId) changeJob(positionId) }, [positionId])
@@ -126,7 +131,13 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   useEffect(() => {
     if (!jobId) return
     const abort = new AbortController(); setPositionLoading(true)
-    rpc<SourcingPosition>('sourcingPosition', { jobId }, abort.signal).then(value => { if (!abort.signal.aborted) setPosition(value) })
+    rpc<SourcingPosition>('sourcingPosition', { jobId }, abort.signal).then(value => {
+      if (abort.signal.aborted) return
+      const settings = value.settings ?? defaultSourcingSettings()
+      const available = value.publishedChannels ? sourcingPlatformsForChannels(value.publishedChannels) : value.platforms ?? []
+      setPosition(value); setSupplement(settings.supplement); setLimit(settings.limit); setMinimumScore(settings.minimumScore); setAutoGreet(settings.autoGreet)
+      setPlatforms(settings.platforms === undefined ? available : settings.platforms.filter(platform => available.includes(platform)))
+    })
       .catch(e => { if (!abort.signal.aborted) setError(String(e.message || e)) }).finally(() => { if (!abort.signal.aborted) setPositionLoading(false) })
     return () => abort.abort()
   }, [jobId, rpc, reload])
@@ -187,6 +198,17 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   const valid = !!position && position.id === jobId && !!(position.description || supplement.trim()) && selectedPlatforms.length > 0 && Number.isInteger(limit) && limit >= 1 && limit <= 50 && Number.isInteger(minimumScore) && minimumScore >= 0 && minimumScore <= 100
   function changeJob(id: string) {
     setJobId(id); setPosition(undefined); setPlatforms([]); setResults(undefined); setRoundId('all'); setDetailData(undefined); setSupplement(''); setSelectedKey(''); setView('results'); setFilter(emptyFilters); setError(''); setMobileDetail(false)
+    setLimit(20); setMinimumScore(DEFAULT_MINIMUM_SCORE); setAutoGreet(true)
+  }
+  function persistSettings(settings: Partial<SourcingSettings>) {
+    const target = jobId
+    // Dispatch on change, without tying the write to a component's abort signal:
+    // leaving this position must not cancel its last settings update.
+    void rpc('saveSourcingSettings', { jobId: target, settings }).then(() => {
+      if (settingsJobId.current === target) setError(current => current.startsWith('寻聘设置保存失败：') ? '' : current)
+    }).catch(error => {
+      if (settingsJobId.current === target) setError(`寻聘设置保存失败：${error instanceof Error ? error.message : String(error)}`)
+    })
   }
   function changeView(next: 'requirements' | 'results') { setView(next) }
   function selectCandidate(key: string) { setSelectedKey(key); setDetail('analysis'); setMobileDetail(true) }
@@ -354,9 +376,9 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
               </details>}
             </div>
             <div className="air-talent-resume-tools" aria-label="平台简历操作">
-              <button type="button" className="air-text-button" disabled={locked || syncingCommunication || startingUpload} onClick={() => void syncCommunication()} title="读取平台已收简历；猎聘从沟通 → 有简历核对唯一标识并取得附件"><ReloadIcon aria-hidden="true" />{syncingCommunication ? '正在同步…' : '同步平台简历'}</button>
+              <button type="button" className="air-text-button" disabled={locked || syncingCommunication || startingUpload} onClick={() => void syncCommunication()} title="读取平台已收简历；猎聘从沟通 → 有简历核对唯一标识并取得附件"><ReloadIcon className="air-resume-sync-icon" aria-hidden="true" />{syncingCommunication ? '正在同步…' : '同步平台简历'}</button>
               {activeUpload ? <button type="button" className="air-button air-button-outline" onClick={() => void rpc('stop', { id: activeUpload.id }).catch(e => setError(String(e.message || e)))}><StopIcon aria-hidden="true" />停止上传</button>
-                : <button type="button" className="air-button air-button-outline" disabled={locked || syncingCommunication || startingUpload || !pendingAttachmentIds.length} onClick={() => void uploadReceived()} title={`上传当前筛选列表中 ${pendingAttachmentIds.length} 份未入库附件到 ${jobName} · 新简历 · 未处理`}><UploadIcon aria-hidden="true" />{startingUpload ? '正在启动上传…' : `上传未入库简历（${pendingAttachmentIds.length}）`}</button>}
+                : <button type="button" className="air-button air-button-outline" disabled={locked || syncingCommunication || startingUpload || !pendingAttachmentIds.length} onClick={() => void uploadReceived()} title={`上传当前筛选列表中 ${pendingAttachmentIds.length} 份未入库附件到 ${jobName} · 新简历 · 未处理`}><UploadIcon aria-hidden="true" />{startingUpload ? '正在启动入库…' : `简历入库（${pendingAttachmentIds.length}）`}</button>}
             </div>
           </div>
           <div className="air-sourcing-filterbar" aria-label="筛选与排序候选人">
@@ -440,20 +462,21 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
         </section>
         <section className="air-sourcing-requirement-section" aria-label="补充要求/加分项">
           <label className="air-label" htmlFor="air-sourcing-supplement">补充要求/加分项 <span className="air-sourcing-caption">选填</span></label>
-          <textarea id="air-sourcing-supplement" rows={3} maxLength={4000} disabled={locked} value={supplement} onChange={e => setSupplement(e.target.value)} placeholder="例如：优先看独立负责过核心模块的人。留空则按职位已有要求寻聘。" />
+          <textarea id="air-sourcing-supplement" rows={3} maxLength={4000} disabled={locked || positionLoading || position?.id !== jobId} value={supplement} onChange={e => { setSupplement(e.target.value); persistSettings({ supplement: e.target.value }) }} placeholder="例如：优先看独立负责过核心模块的人。留空则按职位已有要求寻聘。" />
         </section>
       </div>
       <div className="air-sourcing-settings">
         <h3>安排本轮寻聘</h3><p className="air-sourcing-caption">从人才推荐中筛选，读取简历并分析匹配度</p>
+        <p className="air-sourcing-caption">设置自动保存，下次进入本职位时沿用。</p>
         {positionChannels && <div className="air-sourcing-published-platforms"><span className="air-sourcing-caption">已关联平台</span>{displayedPlatformChannels.length ? displayedPlatformChannels.map(channel => renderPlatformTag(recruitmentPlatformForChannel(channel)!, { key: channel.id, title: channel.name })) : <span className="air-sourcing-caption">暂无</span>}</div>}
-        <fieldset disabled={locked || positionLoading}><legend>招聘平台</legend>{availablePlatforms.map(platform => <label className="air-sourcing-channel" key={platform}><input type="checkbox" checked={selectedPlatforms.includes(platform)} onChange={e => setPlatforms(rows => e.target.checked ? [...new Set([...rows, platform])] : rows.filter(row => row !== platform))} />{renderPlatformTag(platform)}</label>)}</fieldset>
+        <fieldset disabled={locked || positionLoading}><legend>招聘平台</legend>{availablePlatforms.map(platform => <label className="air-sourcing-channel" key={platform}><input type="checkbox" checked={selectedPlatforms.includes(platform)} onChange={e => { const next = e.target.checked ? [...new Set([...platforms, platform])] : platforms.filter(row => row !== platform); setPlatforms(next); persistSettings({ platforms: next }) }} />{renderPlatformTag(platform)}</label>)}</fieldset>
         {!availablePlatforms.length && <p className="air-sourcing-caption">{positionLoading ? '正在读取当前职位的发布渠道…' : positionChannels?.length ? '当前发布渠道暂不支持自动寻聘，目前支持猎聘和 BOSS 直聘。' : positionChannels ? '当前职位暂无发布渠道，请先在薪人薪事设置后刷新。' : '发布渠道信息尚未读取，请完全退出并重开薪灵后刷新。'}</p>}
-        <label className="air-label" htmlFor="air-sourcing-limit">每个平台目标人数</label><div className="air-number-field"><input id="air-sourcing-limit" type="number" min={1} max={50} disabled={locked} value={Number.isNaN(limit) ? '' : limit} onChange={e => setLimit(e.target.value ? Number(e.target.value) : NaN)} /><span>人</span></div>
+        <label className="air-label" htmlFor="air-sourcing-limit">每个平台目标人数</label><div className="air-number-field"><input id="air-sourcing-limit" type="number" min={1} max={50} disabled={locked || positionLoading || position?.id !== jobId} value={Number.isNaN(limit) ? '' : limit} onChange={e => { const next = e.target.value ? Number(e.target.value) : NaN; setLimit(next); if (Number.isInteger(next) && next >= 1 && next <= 50) persistSettings({ limit: next }) }} /><span>人</span></div>
         <p className="air-sourcing-caption">每个平台 1-50 人，依次完成。{Number.isInteger(limit) && selectedPlatforms.length > 0 ? `本轮合计目标 ${limit * selectedPlatforms.length} 人。` : ''}跳过低分及已采集人选，不占目标名额。</p>
-        <label className="air-auto-greet"><input type="checkbox" checked={autoGreet} disabled={locked} onChange={e => setAutoGreet(e.target.checked)} /><span><b>自动打招呼</b><small>为评分达标的人选发送平台默认招呼，已沟通过的人选不重复发送。</small></span></label>
+        <label className="air-auto-greet"><input type="checkbox" checked={autoGreet} disabled={locked || positionLoading || position?.id !== jobId} onChange={e => { setAutoGreet(e.target.checked); persistSettings({ autoGreet: e.target.checked }) }} /><span><b>自动打招呼</b><small>为评分达标的人选发送平台默认招呼，已沟通过的人选不重复发送。</small></span></label>
         <label className="air-label" htmlFor="air-sourcing-minimum-score">最低匹配分</label>
-        <div className="air-number-field"><input id="air-sourcing-minimum-score" type="number" min={0} max={100} step={1} disabled={locked} value={Number.isNaN(minimumScore) ? '' : minimumScore} aria-describedby="air-sourcing-minimum-score-help" onChange={e => setMinimumScore(e.target.value === '' ? NaN : Number(e.target.value))} /><span>分</span></div>
-        <p id="air-sourcing-minimum-score-help" className="air-sourcing-caption">0-100 的整数，默认 60 分，用于简历详情评估后的保存和自动打招呼。列表初筛只核验要求中提到的年龄、学历、经验年限、期望工作城市、就职公司和薪资，必须全部符合才通过。</p>
+        <div className="air-number-field"><input id="air-sourcing-minimum-score" type="number" min={0} max={100} step={1} disabled={locked || positionLoading || position?.id !== jobId} value={Number.isNaN(minimumScore) ? '' : minimumScore} aria-describedby="air-sourcing-minimum-score-help" onChange={e => { const next = e.target.value === '' ? NaN : Number(e.target.value); setMinimumScore(next); if (Number.isInteger(next) && next >= 0 && next <= 100) persistSettings({ minimumScore: next }) }} /><span>分</span></div>
+        <p id="air-sourcing-minimum-score-help" className="air-sourcing-caption">0-100 的整数，默认 60 分，控制详情能力评分的门槛。降低分数不会放宽本轮明确的硬性条件。职位固定字段与 JD 冲突时以固定字段为准；本轮补充明确修改的条件按补充执行。列表与详情核验同一套基本条件，缺少证据会标明具体待核实项。</p>
         {actionButton(true)}
         <p className="air-sourcing-caption">{autoGreet ? '对达标人选点击平台默认单人招呼，不发送自定义消息。' : '本轮仅筛选推荐人才和分析，不发送招呼。'}</p>
 

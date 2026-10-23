@@ -26,9 +26,11 @@ import { sourcingAssessmentDiagnostic, sourcingTargetDiagnostic } from '../sourc
 import { recruitmentPlatform } from '../platforms/registry.js'
 import { runSourcingWorkflow } from './fast-runner.js'
 import { evaluateSources, judgementAnalysis } from './evaluator.js'
-import { sourcingMode, sourcingEntry, isSourcingEntry, assertRecommendationPage, assertRecommendationNavigation, bootstrapSourcing } from './source.js'
-import { assessCandidateFilters } from './candidate-filters.js'
-import { assessListCandidate, validateListCriteria } from './list-screening.js'
+import { sourcingMode, sourcingEntry, isSourcingDocument, assertRecommendationPage, assertRecommendationNavigation, bootstrapSourcing } from './source.js'
+import { assessCandidateFilters, candidateFilterFailure } from './candidate-filters.js'
+import { withFixedListCriteria } from './requirement-policy.js'
+import { assessListCandidate, listAssessmentFailure, validateListCriteria } from './list-screening.js'
+import { visualResumeReader } from './visual-resume.js'
 
 
 const now = () => new Date().toISOString()
@@ -56,10 +58,11 @@ export async function createSourcingSession(ctx: SessionOptions) {
   const platformPositions = job.platformJobs?.[channel.platform]
   const platform = recruitmentPlatform(channel.platform)
   const sourceMode = sourcingMode(job), entryUrl = sourcingEntry(platform, job)
+  const entryAliases = platform.sourcingEntryAliases ?? []
   const recommendation = sourceMode === 'recommend'
   const candidateFilters = recommendation ? job.searchFilters ?? {} : {}
   const positionRoute = platform.createPositionRoute((platformPositions?.length ? platformPositions.map(row => row.name) : [job.position?.name || job.jobName || '']).map(normalized), sourceMode)
-  let pending: { name: string; key: string; profileUrl: string; platformIdentity?: PlatformCandidateIdentity; selectionSnapshot: string; selectionPage: { tabId: number; url: string; documentId?: string }; listText: string; listAssessments: SourcingListAssessment[]; parts: string[]; detailSeen: boolean; identity: string; refs: string[] } | undefined
+  let pending: { name: string; key: string; identityAliases: string[]; profileUrl: string; platformIdentity?: PlatformCandidateIdentity; selectionSnapshot: string; selectionPage: { tabId: number; url: string; documentId?: string }; listText: string; listAssessments: SourcingListAssessment[]; parts: string[]; detailSeen: boolean; identity: string; refs: string[] } | undefined
   const diagnose = (level: 'info' | 'warn', event: string, fields: Record<string, unknown>) => {
     try { ctx.logger?.write(level, `sourcing.${event}`, { taskId: job.id, platform: channel.platform, phase, ...fields }) } catch { /* Diagnostics never change execution. */ }
   }
@@ -69,9 +72,10 @@ export async function createSourcingSession(ctx: SessionOptions) {
     allow: info => !/acquire_file|capture_content|close_tab|network/i.test(info._meta?.browserAgent?.capability ?? info.name) })
   const searchEvidence = platform.createSearchEvidence(broker)
   const greeter = new SourcingGreeting(ctx.store, job, broker, channel.platform, () => ctx.save(job), (phase, message) => ctx.progress(job, phase, message), ctx.greetingPolicy)
+  const readVisual = visualResumeReader(broker, ctx.call, agent, message => ctx.progress(job, 'reading', pending ? `候选人[${pending.name}]：${message}` : message))
   const selectedCandidate = () => {
     if (pending) return { candidateKey: pending.key, name: pending.name, platformIdentity: pending.platformIdentity,
-      verifiedListText: pending.listText.slice(0, 2400), resumeCharacters: pending.parts.join('\n').length,
+      verifiedListText: pending.listText.slice(0, 2400), listEvidenceHash: hash(pending.listText), resumeCharacters: pending.parts.join('\n').length,
       stage: pending.parts.length ? 'reading' as const : 'selected' as const }
     const saved = job.candidates.find(row => row.key === greeter.awaiting)
     if (saved) return { candidateKey: saved.key, name: saved.name, platformIdentity: saved.platformIdentity,
@@ -83,7 +87,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
     const page = call.args.tabId ? (() => { try { return broker.getPage(call.args.tabId, call.args.snapshotId) } catch { return undefined } })() : undefined
     let validationStage = 'navigation_policy'
     try {
-      if (recommendation) assertRecommendationNavigation(call, page, entryUrl)
+      if (recommendation) assertRecommendationNavigation(call, page, entryUrl, entryAliases)
       if (greeter.allows(call)) return
       const searchControl = page && call.args.ref ? searchEvidence.control(page, String(call.args.ref)) : undefined
       positionSelectorSeen ||= hasSourcingPositionSelector(page)
@@ -94,7 +98,8 @@ export async function createSourcingSession(ctx: SessionOptions) {
       }
       const positionControl = positionRoute.allowsChoice(call, page) || !!searchControl
       validationStage = 'navigation_policy'
-      assertSourcingNavigation(call, page, pending?.name, searchTracker.hasFocusedSearch(call, page), positionControl)
+      assertSourcingNavigation(call, page, pending?.name, searchTracker.hasFocusedSearch(call, page),
+        positionControl, !!(call.args.ref && platform.allowsNavigation?.(page, call.args.ref, broker)))
       const selectedCandidate = pending ?? job.candidates.find(person => person.key === greeter.awaiting)
       if (!call.readOnly && ['browser_click', 'browser_hover'].includes(call.name)) {
         const target = readableIdentityRef(page, String(call.args.ref || ''))
@@ -113,7 +118,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
       if (call.name === 'browser_open_tab' || call.name === 'browser_navigate') {
         validationStage = 'navigation_url'
         const url = String(call.args.url ?? '')
-        const isEntry = isSourcingEntry(url, entryUrl)
+        const isEntry = isSourcingDocument(url, entryUrl, entryAliases)
         if (!isEntry && !pending && !greeter.awaiting) throw new Error('SOURCING_PREFLIGHT_REQUIRED: 评分达标前不能导航至个人详情')
         if (!isEntry && !page?.items?.some((item: any) => item.href === url)) throw new Error('SOURCING_URL_UNOBSERVED: 只能进入平台入口或当前已观察的链接')
         if (!isEntry && selectedCandidate) {
@@ -222,7 +227,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
     if (!job.requirements) throw new Error('SEARCH_CONDITIONS_UNVERIFIED: 请先提炼职位要求')
     const page = broker.getPage(input.tabId, input.snapshotId), item = readableIdentityRef(page, input.ref)
     if (recommendation) {
-      assertRecommendationPage(page, entryUrl)
+      assertRecommendationPage(page, entryUrl, entryAliases)
       if (input.mode !== 'position') throw new Error('SOURCING_POSITION_SELECTION_REQUIRED: 推荐寻聘必须确认当前招聘职位，不能使用关键词搜索代替')
     }
     await broker.inspectRefs(page, [input.ref, ...input.filters.map(row => row.ref)], toolSignal, true)
@@ -258,6 +263,13 @@ export async function createSourcingSession(ctx: SessionOptions) {
     if (!pending) throw new Error('先选择当前候选人')
     const selected = pending
     const page = broker.getPage(input.tabId, input.snapshotId)
+    const platformCapture = await platform.readResume?.({ broker, page, candidate: selected, input, signal: toolSignal, readVisual })
+    if (platformCapture) {
+      if (normalized(selected.listText).includes(normalized(platformCapture.resumeText))) throw new Error('SOURCING_RESUME_DETAIL_REQUIRED: 详情正文仍是列表摘要')
+      selected.parts = mergeSourcingResumeParts([...selected.parts, platformCapture.resumeText])
+      selected.detailSeen = true
+      return platformCapture
+    }
     await broker.inspectRefs(page, [input.identityRef, ...input.resumeRefs], toolSignal, true)
     broker.candidateContext(page, [input.identityRef, ...input.resumeRefs], selected.name)
     let parts: string[]
@@ -275,14 +287,14 @@ export async function createSourcingSession(ctx: SessionOptions) {
     selected.parts = mergeSourcingResumeParts([...selected.parts, ...parts])
     const merged = selected.parts.join('\n')
     if (merged.length > 60000) selected.parts = [merged.slice(0, 60000)]
-    selected.detailSeen ||= /(?:工作经历|工作经验|项目经历|项目经验)[\s\S]{12,}/.test(merged)
+    selected.detailSeen ||= /(?:工作经历|工作经验|工作履历|项目经历|项目经验)[\s\S]{12,}/.test(merged)
       && !normalized(selected.listText).includes(normalized(merged))
     return { page, resumeText: merged.slice(0, 30000), truncated: merged.length > 30000,
-      foregroundSource: sourcingResumeDialog(page, input.identityRef)?.text }
+      foregroundSource: sourcingResumeDialog(page, input.identityRef)?.text, evidence: undefined }
   }
   const readCard = async (input: Pick<z.infer<typeof selectionSpec>, 'tabId' | 'snapshotId' | 'ref' | 'name' | 'evidenceRefs' | 'profileRef'>, toolSignal: AbortSignal) => {
     const page = broker.getPage(input.tabId, input.snapshotId)
-    if (recommendation) assertRecommendationPage(page, entryUrl)
+    if (recommendation) assertRecommendationPage(page, entryUrl, entryAliases)
     if (input.tabId !== preparedSearch?.tabId || preparedSearch.documentId && page.documentId !== preparedSearch.documentId) throw new Error('SEARCH_CONDITIONS_UNVERIFIED: 列表页面已改变，请重新确认当前职位和筛选条件')
     await broker.inspectRefs(page, [input.ref, ...input.evidenceRefs, ...(input.profileRef ? [input.profileRef] : [])], toolSignal, true, !!platform.candidateIdentity)
     broker.candidateContext(page, [input.ref, ...input.evidenceRefs], input.name)
@@ -293,15 +305,23 @@ export async function createSourcingSession(ctx: SessionOptions) {
     const evidenceText = sourcingResumeParts(page, input.name, input.ref, evidenceRefs).join('\n').slice(0, 30000)
     previewEvidence = { tabId: input.tabId, snapshotId: input.snapshotId, name: input.name, refs: evidenceRefs, text: evidenceText }
     const platformIdentity = platform.candidateIdentity?.(page, evidenceRefs, broker)
-    const key = platformIdentity ? platformIdentityKey(channel.platform, platformIdentity) : hash({ platform: channel.platform, identity: profile.url || normalized(evidenceText) })
+    const textIdentity = platform.candidateTextIdentity?.(evidenceText)
+    const key = platformIdentity ? platformIdentityKey(channel.platform, platformIdentity) : hash({ platform: channel.platform, identity: profile.url || textIdentity?.canonical || normalized(evidenceText) })
     const legacyKey = hash({ platform: channel.platform, identity: profile.url || normalized(quote) })
-    const duplicate = rejected.has(key) || previous.has(key) || previous.has(legacyKey) || job.candidates.some(row => row.key === key || row.key === legacyKey)
-    return { page, key, quote, profile, platformIdentity, evidenceText, duplicate }
+    const identityAliases = !platformIdentity && !profile.url && textIdentity
+      ? [...new Set(textIdentity.aliases.map(identity => hash({ platform: channel.platform, identity })))].filter(alias => alias !== key) : []
+    const keys = [key, legacyKey, ...identityAliases]
+    const duplicate = keys.some(alias => rejected.has(alias) || previous.has(alias)) || job.candidates.some(row => {
+      if (row.platform !== channel.platform) return false
+      if (platformIdentity && row.platformIdentity && platformIdentityKey(channel.platform, platformIdentity) !== platformIdentityKey(channel.platform, row.platformIdentity)) return false
+      return [row.key, ...(row.identityAliases ?? [])].some(alias => keys.includes(alias))
+    })
+    return { page, key, identityAliases, quote, profile, platformIdentity, evidenceText, duplicate }
   }
   const selectCandidate = async (input: z.infer<typeof selectionSpec>, toolSignal: AbortSignal, evidence?: Awaited<ReturnType<typeof readCard>>) => {
     if (greeter.awaiting) throw new Error('TASK_RESULT_REQUIRED: 先完成当前候选人的招呼')
     if (!searchReady || !job.requirements) throw new Error('SEARCH_CONDITIONS_UNVERIFIED: 先确认实际搜索条件')
-    const { page, key, quote, profile, platformIdentity, evidenceText, duplicate } = evidence ?? await readCard(input, toolSignal)
+    const { page, key, identityAliases, quote, profile, platformIdentity, evidenceText, duplicate } = evidence ?? await readCard(input, toolSignal)
     if (pending) {
       if (key !== pending.key) throw new Error('TASK_RESULT_REQUIRED: 先完成已选候选人的评估，不能覆盖为其他人')
       return { ...status(), alreadySelected: true, qualified: true, duplicate: false,
@@ -325,19 +345,21 @@ export async function createSourcingSession(ctx: SessionOptions) {
       rejected.add(key)
       if (preview.mismatch) job.skippedByFilters = (job.skippedByFilters ?? 0) + 1
       else job.skippedUnverified = (job.skippedUnverified ?? 0) + 1
-      await ctx.progress(job, 'reading', `列表初筛 ${preview.matchedCount}/${preview.requiredCount} 项符合，${preview.mismatch ? '存在不符合的要求' : '有要求缺少列表证据'}，已跳过并继续寻聘`)
+      await ctx.progress(job, 'reading', `候选人[${input.name}]列表初筛 ${preview.matchedCount}/${preview.requiredCount} 项符合；${listAssessmentFailure(job.requirements.listCriteria!, input.listAssessments)}；已跳过并继续寻聘`)
       return { skipped: true, qualified: false, score: preview.score, matchedCount: preview.matchedCount, requiredCount: preview.requiredCount, next: '列表初筛要求必须全部符合，不打开详情' }
     }
-    pending = { refs: [input.ref, ...input.evidenceRefs], identity: quote, name: input.name, key, profileUrl: profile.url, platformIdentity, selectionSnapshot: input.snapshotId,
+    pending = { refs: [input.ref, ...input.evidenceRefs], identity: quote, name: input.name, key, identityAliases, profileUrl: profile.url, platformIdentity, selectionSnapshot: input.snapshotId,
       selectionPage: { tabId: page.tabId, url: page.url, documentId: page.documentId }, listText: evidenceText, listAssessments: input.listAssessments, parts: [], detailSeen: false }
     phase = 'reading'
-    await ctx.progress(job, 'reading', '列表初筛通过，正在打开候选人在线简历')
+    await ctx.progress(job, 'reading', `候选人[${input.name}]列表初筛通过，准备打开简历详情`)
     return { duplicate: false, qualified: true, score: preview.score, matchedCount: preview.matchedCount, requiredCount: preview.requiredCount, name: input.name, next: '读取当前候选人简历后逐项分析' }
   }
   const recordCandidate = async (input: z.infer<typeof recordSpec>, toolSignal: AbortSignal, captured?: Awaited<ReturnType<typeof collectResume>>) => {
     if (!pending || !job.requirements) throw new Error('先选择当前候选人')
     if (qualifiedCount() >= totalTarget || qualifiedCount() - before >= quota) throw new Error('TASK_LIMIT_REACHED: 本渠道或本轮已达到人数上限')
-    const { page, resumeText, truncated, foregroundSource } = captured ?? await collectResume(input, toolSignal)
+    const capture = captured ?? await collectResume(input, toolSignal)
+    const { page, resumeText, truncated, foregroundSource } = capture
+    const candidateLabel = `候选人[${pending.name}]`
     if (!resumeText) throw new Error('未读取到可归属当前候选人的简历')
     assertResumeContent(resumeText)
     for (const field of input.fields) if (!normalized(resumeText).includes(normalized(field.value))) throw new Error(`SOURCING_FIELD_EVIDENCE_MISSING: ${field.label}无法在已读原文定位，请逐字摘录；原文没有则省略该字段`)
@@ -348,32 +370,32 @@ export async function createSourcingSession(ctx: SessionOptions) {
       diagnose('info', 'candidate_discarded', { candidateKey: pending.key, reason: eligibility.mismatch ? 'final_conditions_mismatch' : 'final_conditions_unknown',
         conditionStates: input.filterAssessments.map(row => ({ field: row.field, state: row.state })) })
       rejected.add(pending.key); pending = undefined; job.skippedByFilters = (job.skippedByFilters ?? 0) + 1
-      await ctx.progress(job, 'reading', '城市、经验或学历不符合或尚无法确认，未保存本次人选')
+      await ctx.progress(job, 'reading', `${candidateLabel}：${candidateFilterFailure(candidateFilters, input.filterAssessments)}；未保存本次人选`)
       return { skipped: true, qualified: false, score: assessment.score }
     }
     const hardConflict = !!assessment.scoring && assessment.verdict === 'unqualified'
     if (hardConflict || assessment.score < minimumScore && !assessment.scoring?.needsReview) {
       diagnose('info', 'candidate_discarded', { candidateKey: pending.key, reason: hardConflict ? 'final_required_condition_mismatch' : 'final_score_below_minimum', score: assessment.score, coverage: assessment.coverage, minimumScore })
       rejected.add(pending.key); pending = undefined; job.skippedLowScore = (job.skippedLowScore ?? 0) + 1
-      await ctx.progress(job, 'reading', hardConflict ? '详细评估发现硬性条件明确不符，已跳过并继续寻聘' : `详细评估未达到${minimumScore}分，已丢弃本次采集信息并跳过`)
+      await ctx.progress(job, 'reading', hardConflict ? `${candidateLabel}详细评估发现硬性条件明确不符，已跳过并继续寻聘` : `${candidateLabel}详细评估未达到${minimumScore}分，已丢弃本次采集信息并跳过`)
       return { skipped: true, qualified: false, score: assessment.score }
     }
     const scope = 'online' as const
     const candidateKey = pending.key
-    job.candidates.push({ name: pending.name, key: pending.key, profileUrl: pending.profileUrl, platformIdentity: pending.platformIdentity, platform: channel.platform, sourceUrl: safePageUrl(page.url), collectedAt: now(), scope, resumeTruncated: truncated,
-      fields: input.fields, resumeText, listAssessments: pending.listAssessments, assessments: input.assessments, filterAssessments: input.filterAssessments, analysis: input.analysis, ...assessment })
+    job.candidates.push({ name: pending.name, key: pending.key, ...(pending.identityAliases.length ? { identityAliases: pending.identityAliases } : {}), profileUrl: pending.profileUrl, platformIdentity: pending.platformIdentity, platform: channel.platform, sourceUrl: safePageUrl(page.url), collectedAt: now(), scope, resumeTruncated: truncated,
+      fields: input.fields, resumeText, ...(capture.evidence ? { resumeEvidence: capture.evidence } : {}), listAssessments: pending.listAssessments, assessments: input.assessments, filterAssessments: input.filterAssessments, analysis: input.analysis, ...assessment })
     channel.candidateCount = qualifiedCount() - before
     job.results.push({ key: pending.key, name: pending.name, stage: 'succeeded', detail: `匹配 ${assessment.score}/100 · ${assessment.coverage < 100 ? '有信息待核实' : '已读原文评估'}`, updatedAt: now() })
     if (!assessment.scoring?.needsReview) greeter.queue(job.candidates[job.candidates.length - 1], pending.identity, page, foregroundSource)
     previous.add(pending.key); pending = undefined
     phase = 'reading'
-    await ctx.progress(job, 'reading', assessment.scoring?.needsReview ? '当前候选人有重要信息待核实，已保留分析；继续寻找达标人选' : `${PLATFORMS[channel.platform].label}已评估 ${channel.candidateCount}/${quota} 位候选人`)
+    await ctx.progress(job, 'reading', assessment.scoring?.needsReview ? `${candidateLabel}有重要信息待核实，已保留分析；继续寻找达标人选` : `${PLATFORMS[channel.platform].label}已保存 ${channel.candidateCount}/${quota} 位达标人选 · ${candidateLabel}`)
     diagnose('info', 'candidate_recorded', { candidateKey, scope, score: assessment.score, coverage: assessment.coverage,
       capturedCharacters: resumeText.length, candidateCount: job.candidates.length, saved: true })
     return status()
   }
   const assertResumeContent = (text: string) => {
-    if (!pending?.detailSeen || !/(?:工作经历|工作经验|项目经历|项目经验)[\s\S]{12,}/.test(text)
+    if (!pending?.detailSeen || !/(?:工作经历|工作经验|工作履历|项目经历|项目经验)[\s\S]{12,}/.test(text)
       || normalized(pending.listText).includes(normalized(text))) {
       throw new Error('SOURCING_RESUME_DETAIL_REQUIRED: 尚未取得超出列表摘要的工作或项目经历；请继续读取当前简历详情，无法读取时跳过，不能按完成采集保存')
     }
@@ -391,11 +413,12 @@ export async function createSourcingSession(ctx: SessionOptions) {
     }),
     hook('sourcing_define_requirements', '按recruitment-matching技能提炼分层匹配标准、补充要求覆盖关系及搜索关键词。已有标准不可修改。', rubricRequirementsSpec, async input => {
       if (job.requirements?.listCriteria) return job.requirements
+      input = { ...input, listCriteria: withFixedListCriteria(job.position!, job.supplement, input.listCriteria) }
       validateCriteria(input.criteria, sourcingSource(job.position!, job.supplement))
       validateListCriteria(input.listCriteria, sourcingSource(job.position!, job.supplement))
       validateSupplementCoverage(input, job.supplement)
       if (!normalized(sourcingSource(job.position!, job.supplement)).toLowerCase().includes(normalized(input.keyword).toLowerCase())) throw new Error('搜索关键词必须出自职位名称或要求')
-      job.requirements = { ...input, rubricVersion: 2 }
+      job.requirements = { ...input, basicFilters: job.searchFilters ?? deriveSourcingSearchFilters(job.position!, job.supplement), rubricVersion: 2 }
       phase = 'searching'
       await ctx.store.put(`criteria-${job.requirementVersion}`, job.requirements)
       await ctx.progress(job, 'searching', `已提炼 ${input.criteria.length} 个匹配维度`)
@@ -433,20 +456,22 @@ export async function createSourcingSession(ctx: SessionOptions) {
       z.object({ reason: z.string().trim().min(1).max(300) }).strict(), async () => {
         if (greeter.awaiting) throw new Error('TASK_RESULT_REQUIRED: 当前招呼尚未完成或待核对，不能通过跳过解除保护')
         if (!pending) return { skipped: false, next: '当前没有待处理人选，无需skip；只选择当前可见且未处理的新人，或滚动候选列表继续。' }
-        const key = pending.key, discardedCharacters = pending.parts.join('\n').length
+        const key = pending.key, name = pending.name, discardedCharacters = pending.parts.join('\n').length
         rejected.add(key); pending = undefined; previewEvidence = undefined; lastIssue = ''; phase = 'reading'
         job.skippedUnverified = (job.skippedUnverified ?? 0) + 1
         diagnose('info', 'candidate_abandoned', { candidateKey: key, discardedCharacters, saved: false })
-        await ctx.progress(job, 'reading', '已放弃当前未保存的人选，可返回列表继续寻聘')
+        await ctx.progress(job, 'reading', `已放弃候选人[${name}]，未保存，可返回列表继续寻聘`)
         return { skipped: true, saved: false, discardedCharacters, next: '返回原推荐或搜索列表，核对筛选后选择下一人；不重复选择已放弃的人选' }
       }),
     hook('sourcing_read_resume', '滚动前保存当前候选人的已读简历片段，随后可继续滚动；宿主核验身份并累积真实原文。', readResumeSpec, async (input, toolSignal) => {
       const captured = await collectResume(input, toolSignal)
       diagnose('info', 'resume_read', { candidateKey: pending?.key, tabId: input.tabId, snapshotId: input.snapshotId,
         anchorRef: input.identityRef, resumeRefs: input.resumeRefs, capturedCharacters: captured.resumeText.length,
-        truncated: captured.truncated, scope: pending?.detailSeen ? 'online' : 'summary', saved: false })
+        truncated: captured.truncated, scope: pending?.detailSeen ? 'online' : 'summary',
+        sourceKind: captured.evidence?.kind ?? 'dom', imagePages: captured.evidence?.pages, imageHashes: captured.evidence?.imageHashes, saved: false })
       phase = 'evaluating'
-      await ctx.progress(job, 'evaluating', `已读取当前候选人 ${captured.resumeText.length} 字原文，正在分析匹配度`)
+      if (!pending?.detailSeen) throw new Error('SOURCING_RESUME_DETAIL_REQUIRED: 尚未取得超出列表摘要的简历详情正文')
+      await ctx.progress(job, 'evaluating', `候选人[${pending!.name}]已读取简历详情 ${captured.resumeText.length} 字${captured.evidence ? '（图片识别）' : ''}，正在分析匹配度`)
       return { capturedCharacters: captured.resumeText.length, truncated: captured.truncated, scope: pending?.detailSeen ? 'online' : 'summary' }
     }),
     hook('sourcing_record_candidate', '保存当前候选人已读取原文、基本信息和带证据的逐项分析，宿主计算得分。', recordSpec, recordCandidate),
@@ -463,7 +488,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
         if (!input.exhaustion) throw new Error('SOURCING_QUOTA_NOT_REACHED: 本平台未达到目标人数，请继续翻页；确无更多结果需引用exhaustion证据，操作受阻请停止')
         const page = broker.getPage(input.exhaustion.tabId, input.exhaustion.snapshotId)
         if (input.exhaustion.tabId !== preparedSearch?.tabId || preparedSearch.documentId && page.documentId !== preparedSearch.documentId) throw new Error('SEARCH_CONDITIONS_UNVERIFIED: 请先重新确认当前列表职位和筛选，再核对末尾提示')
-        if (recommendation) assertRecommendationPage(page, entryUrl)
+        if (recommendation) assertRecommendationPage(page, entryUrl, entryAliases)
         verifySourcingExhaustion(page, input.exhaustion)
         diagnose('info', 'channel_exhausted', { channelCount: qualifiedCount() - before, channelLimit: quota, tabId: input.exhaustion.tabId, snapshotId: input.exhaustion.snapshotId, ref: input.exhaustion.ref })
       }
@@ -506,7 +531,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
       preview: async (card, previewSignal) => {
         const page = broker.currentPage()
         const evidence = await readCard({ ...card, tabId: page.tabId, snapshotId: page.snapshotId }, previewSignal)
-        return { text: evidence.evidenceText, duplicate: evidence.duplicate }
+        return { text: evidence.evidenceText, duplicate: evidence.duplicate, candidateKey: evidence.key }
       },
       complete: () => done || !greeter.awaiting && qualifiedCount() - before >= quota,
       remaining: () => Math.max(0, quota - (qualifiedCount() - before)),
@@ -517,7 +542,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
       entryUrl, sourceMode,
       position: job.position && { id: job.position.id, name: job.position.name, city: job.position.city, department: job.position.department, description: job.position.description }, supplement: job.supplement, supplementParts: supplementParts(job.supplement), requirements: job.requirements, autoGreet: !!job.autoGreet, minimumScore, platformJobs: job.platformJobs?.[channel.platform],
       searchFilters: job.searchFilters, searchOrder: ['select_platform_position', 'apply_city_experience_education', 'confirm_search', 'read_and_score_candidates'], channelLimit: quota, totalLimit: totalTarget, limitScope: job.limitScope, previousCount: previous.size }, tools, signal,
-      initialToolResults: await bootstrapSourcing(broker, entryUrl, recommendation, signal), maxTurns: 24 + quota * 14, maxDurationMs: 20 * 60 * 1000,
+      initialToolResults: await bootstrapSourcing(broker, entryUrl, recommendation, signal, entryAliases), maxTurns: 24 + quota * 14, maxDurationMs: 20 * 60 * 1000,
       modelPurpose: 'navigation', maxOutputTokens: 2048,
       logger: ctx.logger, isComplete: () => done || !greeter.awaiting && qualifiedCount() - before >= quota,
       isFatal: error => /OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error)),

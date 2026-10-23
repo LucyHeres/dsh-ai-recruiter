@@ -4,15 +4,24 @@ import { LIEPIN_POSITION_ROUTE, LIEPIN_RECOMMENDATION_ROUTE, LiepinPositionRoute
 import { LiepinSourcingDriver } from './sourcing-driver.js'
 import { liepinDefinition } from './definition.js'
 import { liepinCandidateIdentity } from './candidate-identity.js'
+import { syncLiepinResumes, LIEPIN_RESUME_ORIGINS } from './resume-sync.js'
+import { liepinPromotionClose, LIEPIN_PROMOTION_GUIDANCE } from './promotion-overlay.js'
 
 export const liepinPlatform: RecruitmentPlatform = {
+  allowsNavigation: (page, ref, broker) => !!liepinPromotionClose(page, ref, broker),
   candidateIdentity: liepinCandidateIdentity,
   sourcingEntry: liepinDefinition.sourcingEntry,
   sourcingSearchEntry: liepinDefinition.sourcingSearchEntry,
-  sourcingHints: LIEPIN_RECOMMENDATION_ROUTE,
-  sourcingSearchHints: LIEPIN_POSITION_ROUTE,
+  sourcingHints: LIEPIN_RECOMMENDATION_ROUTE + LIEPIN_PROMOTION_GUIDANCE,
+  sourcingSearchHints: LIEPIN_POSITION_ROUTE + LIEPIN_PROMOTION_GUIDANCE,
   observationFormat: 'dom',
   createSearchEvidence: broker => new LiepinSearchEvidence(broker),
   createPositionRoute: (names, mode) => new LiepinPositionRoute(names, mode === 'recommend' ? LIEPIN_RECOMMENDATION_ROUTE : LIEPIN_POSITION_ROUTE),
   createSourcingDriver: context => new LiepinSourcingDriver(context),
+  // 猎聘的接收记录来自聊天接口响应，通用 DOM 读取覆盖不到。
+  communicationSync: {
+    origins: LIEPIN_RESUME_ORIGINS,
+    hostTools: ['browser_network_response', 'artifact_read'],
+    sync: (broker, candidates, store, signal) => syncLiepinResumes(broker, candidates, store, signal),
+  },
 }

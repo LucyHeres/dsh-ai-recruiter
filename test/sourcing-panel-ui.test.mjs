@@ -13,7 +13,7 @@ const rounds = [{...current,number:2},{...current,id:'old',number:1,candidateCou
 const summaries = people.map((person,i)=>({...person,roundId:i?'new':'old',roundNumber:i?2:1,roundCreatedAt:current.createdAt,resultKey:`${i?'new':'old'}:${person.key}`}))
 const results = {jobId:'java',roundId:'all',rounds,current,candidates:summaries}
 const details = (i) => ({jobId:'java',roundId:i?'new':'old',candidate:people[i],requirements:{criteria:[{id:'java',label:i?'新轮要求':'旧轮要求',must:true,quote:i?'新的要求':'旧的要求',weight:100}]}})
-const indexes = {jobId:2,position:3,platforms:6,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,autoGreet:22,expanded:23,syncing:25,communicationNotice:26}
+const indexes = {jobId:2,position:3,positionLoading:4,supplement:5,platforms:6,limit:7,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,autoGreet:22,expanded:23,minimumScore:24,syncing:25,communicationNotice:26}
 function fixture(overrides={}, locked=true, compact=false, options={}) {
   const states=[[],false,'java',position,false,'',['liepin'],10,results,'all',details(1),'results','',{score:'all',communication:'all',platform:'all'},'analysis','',0,false,false,false,'score-desc',false,undefined,true]
   Object.entries(overrides).forEach(([name,value])=>states[indexes[name]]=value)
@@ -21,7 +21,7 @@ function fixture(overrides={}, locked=true, compact=false, options={}) {
   const react={...require('react'),useState:initial=>{const i=index++;if(states[i]===undefined)states[i]=typeof initial==='function'?initial():initial;return [states[i],v=>{states[i]=typeof v==='function'?v(states[i]):v}]},useRef:value=>{const i=refIndex++;return refs[i]??={current:value}},useEffect:(effect,deps)=>effects.push({effect,deps})}
   const module={exports:{}}
   runInNewContext(source,{module,exports:module.exports,require:name=>name==='react'?react:require(name),AbortController,setTimeout:options.setTimeout??setTimeout,clearTimeout:options.clearTimeout??clearTimeout,crypto:require('node:crypto').webcrypto})
-  const render=()=>{index=0;refIndex=0;effects=[];return module.exports.SourcingPanel({compact,executionId:options.executionId,rpc:async(...args)=>{requests.push(args);return options.rpc ? options.rpc(...args) : details(1)},state:options.state??{activeJobId:'new',jobs:[{...current,kind:'talent_sourcing'}]},locked,pending:options.pending??false,busy:options.busy??'',onStart:request=>starts.push(request),onReconcile(){}})}
+  const render=()=>{index=0;refIndex=0;effects=[];return module.exports.SourcingPanel({compact,positionId:options.positionId,executionId:options.executionId,rpc:async(...args)=>{requests.push(args);return options.rpc ? options.rpc(...args) : details(1)},state:options.state??{activeJobId:'new',jobs:[{...current,kind:'talent_sourcing'}]},locked,pending:options.pending??false,busy:options.busy??'',onStart:request=>starts.push(request),onReconcile(){}})}
   return {render,states,starts,requests,effects:()=>effects,set:(name,value)=>states[indexes[name]]=value,get:name=>states[indexes[name]]}
 }
 function elements(element){if(Array.isArray(element))return element.flatMap(elements);if(element==null||typeof element==='boolean')return [];return typeof element==='object'?[element,...elements(element.props?.children)]:[element]}
@@ -29,6 +29,91 @@ const text=element=>elements(element).filter(item=>typeof item!=='object').join(
 const find=(tree,predicate)=>elements(tree).find(row=>row?.props&&predicate(row))
 const button=(tree,label)=>find(tree,row=>row.type==='button'&&(text(row)===label||row.props['aria-label']===label))
 const cards=tree=>elements(tree).filter(row=>row?.props?.className?.startsWith('air-sourcing-person '))
+
+test('edits restore per position after leaving the panel without starting a task',async()=>{
+ const {Store}=await import('../dist/lib/store.js')
+ const {Workbench}=await import('../dist/lib/workbench.js')
+ const {mkdtemp,rm}=await import('node:fs/promises')
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path')
+ const directory=await mkdtemp(join(tmpdir(),'sourcing-settings-ui-'))
+ try {
+  const store=new Store(directory,'company');await store.init()
+  await store.put('sourcing-previous',{id:'previous',kind:'talent_sourcing',jobId:'java',createdAt:'2026-10-23',
+   limit:2,minimumScore:6,platforms:['boss'],supplement:'软件销售经验优先',autoGreet:false,candidates:[],results:[]})
+  const service=Object.create(Workbench.prototype);service.store=store
+  service.sourcing={loadPosition:async id=>({...position,id,name:id,description:'当前职位最新描述'})}
+  await service.saveSourcingSettings({jobId:'sales',settings:{limit:4,minimumScore:80,supplement:'销售职位要求',autoGreet:true,platforms:['liepin']}})
+  const pending=[]
+  const options={state:{jobs:[]},rpc:(method,request,signal)=>{
+   assert.ok(['sourcingPosition','saveSourcingSettings'].includes(method),'editing settings cannot start recruitment')
+   const task=service[method](request,signal);pending.push(task);return task
+  }}
+  const drain=async()=>{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve))}
+  const load=async view=>{
+   view.render()
+   const effect=view.effects().find(row=>row.deps?.length===3&&row.deps[0]===view.get('jobId')&&typeof row.deps[1]==='function')
+   effect.effect();await drain();view.render()
+  }
+  const view=fixture({view:'requirements'},false,false,options)
+  await load(view)
+  assert.equal(view.get('limit'),2);assert.equal(view.get('minimumScore'),6)
+  assert.equal(view.get('autoGreet'),false);assert.equal(view.get('supplement'),'软件销售经验优先')
+  assert.deepEqual(Array.from(view.get('platforms')),['boss'])
+  const input=(id,value)=>find(view.render(),row=>row.props.id===id).props.onChange({target:{value}})
+  input('air-sourcing-limit','7');input('air-sourcing-minimum-score','0');input('air-sourcing-supplement','')
+  find(find(view.render(),row=>row.props.className==='air-auto-greet'),row=>row.type==='input').props.onChange({target:{checked:true}})
+  find(find(view.render(),row=>row.type==='fieldset'),row=>row.type==='input'&&row.props.checked).props.onChange({target:{checked:false}})
+  await drain();assert.equal(view.starts.length,0)
+  const remounted=fixture({view:'requirements',position:undefined},false,true,options)
+  await load(remounted)
+  assert.equal(remounted.get('limit'),7);assert.equal(remounted.get('minimumScore'),0)
+  assert.equal(remounted.get('autoGreet'),true);assert.equal(remounted.get('supplement'),'')
+  assert.deepEqual(Array.from(remounted.get('platforms')),[],'an intentionally empty platform selection survives re-entry')
+  const switchTo=async id=>{
+   options.positionId=id;remounted.render()
+   remounted.effects().find(row=>row.deps?.length===1&&row.deps[0]===id).effect()
+   remounted.set('view','requirements');await load(remounted)
+  }
+  await switchTo('sales')
+  assert.equal(remounted.get('limit'),4);assert.equal(remounted.get('minimumScore'),80)
+  assert.equal(remounted.get('supplement'),'销售职位要求');assert.deepEqual(Array.from(remounted.get('platforms')),['liepin'])
+  await switchTo('java')
+  assert.equal(remounted.get('limit'),7);assert.equal(remounted.get('minimumScore'),0)
+  const platformEffect=remounted.effects().find(row=>row.deps?.length===3&&row.deps[0]==='java'&&row.deps[1]==='java')
+  platformEffect.effect();assert.deepEqual(Array.from(remounted.get('platforms')),[])
+  const settingsPane=find(remounted.render(),row=>row.props.title==='寻聘设置')
+  assert.equal(button(settingsPane,'开始寻聘').props.disabled,true,'a saved empty selection must not silently enable all platforms')
+  assert.equal((await store.list('sourcing-')).length,1)
+ } finally {await rm(directory,{recursive:true,force:true})}
+})
+
+test('transient invalid numbers do not overwrite settings and persistence failures are visible',async()=>{
+ const view=fixture({view:'requirements'},false,false,{state:{jobs:[]},rpc:async()=>{throw new Error('磁盘不可写')}})
+ const change=value=>find(view.render(),row=>row.props.id==='air-sourcing-minimum-score').props.onChange({target:{value}})
+ change('');change('6.5');change('101');assert.equal(view.requests.length,0)
+ change('0');await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(view.requests.length,1);assert.equal(view.requests[0][0],'saveSourcingSettings')
+ assert.equal(view.requests[0][1].settings.minimumScore,0)
+ assert.match(text(view.render()),/寻聘设置保存失败.*磁盘不可写/)
+ const loading=fixture({view:'requirements',positionLoading:true},false,false,{state:{jobs:[]}}).render()
+ for(const id of ['air-sourcing-limit','air-sourcing-minimum-score','air-sourcing-supplement'])assert.equal(find(loading,row=>row.props.id===id).props.disabled,true)
+ assert.equal(find(find(loading,row=>row.props.className==='air-auto-greet'),row=>row.type==='input').props.disabled,true)
+})
+
+test('a late position-settings response cannot replace the next selected position',async()=>{
+ let finish
+ const options={state:{jobs:[]},positionId:'java',rpc:async(method,{jobId})=>jobId==='java'?new Promise(resolve=>{finish=resolve}):{...position,id:jobId,settings:{limit:4,minimumScore:80,supplement:'另一个职位',autoGreet:false,platforms:['boss']}}}
+ const view=fixture({view:'requirements'},false,false,options)
+ view.render();const old=view.effects().find(row=>row.deps?.length===3&&typeof row.deps[1]==='function').effect()
+ options.positionId='sales';view.render();view.effects().find(row=>row.deps?.length===1&&row.deps[0]==='sales').effect()
+ old();view.render();view.effects().find(row=>row.deps?.length===3&&typeof row.deps[1]==='function').effect()
+ await new Promise(resolve=>setImmediate(resolve))
+ finish({...position,settings:{limit:50,minimumScore:0,supplement:'旧职位',autoGreet:true}})
+ await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(view.get('jobId'),'sales');assert.equal(view.get('position').id,'sales')
+ assert.equal(view.get('limit'),4);assert.equal(view.get('minimumScore'),80);assert.equal(view.get('autoGreet'),false)
+ assert.equal(view.get('supplement'),'另一个职位')
+})
 
 test('all rounds are the default, cards keep percentage scores, and no favorites controls remain',()=>{
  const view=fixture(),tree=view.render();assert.equal(view.get('roundId'),'all');assert.equal(cards(tree).length,2)
@@ -164,7 +249,7 @@ function noticeClock(){
 }
 const feedbackToast=tree=>find(tree,row=>row.props.className?.startsWith('air-feedback-toast'))
 function mountNoticeTimer(view){view.render();return view.effects().find(row=>row.deps?.length===1&&row.deps[0]===view.get('communicationNotice')).effect()}
-test('sync shows a result toast only after completion and removes it after exactly three seconds',async()=>{
+test('sync shows a result toast only after completion and removes it after exactly six seconds',async()=>{
  let finish;const clock=noticeClock()
  const view=fixture({},false,false,{...clock,rpc:()=>new Promise(resolve=>{finish=resolve})})
  button(view.render(),'同步平台简历').props.onClick()
@@ -172,22 +257,22 @@ test('sync shows a result toast only after completion and removes it after exact
  finish({checked:2,matched:1,updated:1,platforms:[]});await new Promise(resolve=>setImmediate(resolve))
  const toast=feedbackToast(view.render());assert.equal(toast.props.role,'status');assert.match(text(toast),/本次核对 2 位候选人/)
  assert.equal(find(view.render(),row=>row.props.className==='air-talent-feedback'),undefined,'finished results do not occupy the toolbar')
- mountNoticeTimer(view);clock.advance(2999);assert.ok(feedbackToast(view.render()))
+ mountNoticeTimer(view);clock.advance(5999);assert.ok(feedbackToast(view.render()))
  clock.advance(1);assert.equal(feedbackToast(view.render()),undefined);assert.equal(clock.pending(),0)
 })
-test('identical sync results receive a fresh three-second lifetime and cleanup cancels the timer',async()=>{
+test('identical sync results receive a fresh six-second lifetime and cleanup cancels the timer',async()=>{
  const clock=noticeClock(),result={checked:2,matched:1,updated:1,platforms:[]}
  const view=fixture({},false,false,{...clock,rpc:async()=>result})
  button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
  const first=view.get('communicationNotice'),cleanup=mountNoticeTimer(view)
- clock.advance(2000)
+ clock.advance(5000)
  button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
  assert.notEqual(view.get('communicationNotice'),first)
- cleanup();mountNoticeTimer(view);clock.advance(2999);assert.ok(feedbackToast(view.render()))
+ cleanup();mountNoticeTimer(view);clock.advance(5999);assert.ok(feedbackToast(view.render()))
  clock.advance(1);assert.equal(feedbackToast(view.render()),undefined)
  button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
  const onUnmount=mountNoticeTimer(view),notice=view.get('communicationNotice')
- onUnmount();assert.equal(clock.pending(),0);clock.advance(3000);assert.equal(view.get('communicationNotice'),notice,'an unmounted component is not updated')
+ onUnmount();assert.equal(clock.pending(),0);clock.advance(6000);assert.equal(view.get('communicationNotice'),notice,'an unmounted component is not updated')
 })
 test('switching positions cannot display cached results and candidate navigation uses evaluation identity',()=>{
  const switched=fixture({jobId:'different'}).render();assert.equal(cards(switched).length,0);assert.equal(find(switched,row=>row.type==='article'),undefined)
@@ -333,19 +418,19 @@ test('talent toolbar uploads only unimported attachments in the current filtered
  const view=fixture({results:withFiles},false,false,{state:{jobs:[]},rpc:()=>new Promise(resolve=>{finish=resolve})})
  let tree=view.render()
  assert.ok(button(tree,'同步平台简历'));assert.equal(button(tree,'刷新结果'),undefined)
- assert.ok(button(tree,'上传未入库简历（2）'))
+ assert.ok(button(tree,'简历入库（2）'))
  for(const control of elements(tree).filter(row=>row?.type==='button'))assert.equal(elements(control.props.children).filter(row=>row?.type==='button').length,0)
  find(tree,row=>row.props.id==='air-filter-score').props.onChange('70')
- tree=view.render();const upload=button(tree,'上传未入库简历（1）');assert.equal(upload.props.disabled,false)
+ tree=view.render();const upload=button(tree,'简历入库（1）');assert.equal(upload.props.disabled,false)
  upload.props.onClick();upload.props.onClick();assert.equal(view.requests.length,1,'double click cannot start two batch tasks')
  assert.equal(view.requests[0][0],'uploadReceivedResumes');assert.equal(view.requests[0][1].jobId,'java');assert.equal(view.requests[0][1].roundId,'all')
  assert.deepEqual(Array.from(view.requests[0][1].attachmentIds),[ids[3]])
- assert.equal(button(view.render(),'正在启动上传…').props.disabled,true)
+ assert.equal(button(view.render(),'正在启动入库…').props.disabled,true)
  finish({id:'upload-task'});await new Promise(resolve=>setImmediate(resolve))
  assert.match(text(view.render()),/当前职位 · 新简历 · 未处理/)
  view.set('roundId','old');view.set('results',{...withFiles,roundId:'old',candidates:[withFiles.candidates[0]]})
  find(view.render(),row=>row.props.id==='air-filter-score').props.onChange('all')
- assert.ok(button(view.render(),'上传未入库简历（1）'))
+ assert.ok(button(view.render(),'简历入库（1）'))
 })
 test('active attachment upload exposes progress and stop within the same talent list',async()=>{
  const task={id:'upload',kind:'resume_import',resumeSource:'platform_received',jobId:'java',status:'running',detail:'1/2：正在提交入库'}

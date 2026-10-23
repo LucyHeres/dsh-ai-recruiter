@@ -68,7 +68,7 @@ test('position homepage uses the real RPC envelope with empty args for its no-ar
 
 test('normal startup never shows reconciliation; a lost response retains the same request id', async () => {
   const workbench = { jobs: [], activeJobId: null, connection: { ready: true, available: true, busy: false } }
-  const state = [workbench, 'talent_sourcing', Date.now(), '', '', '', {}, '', false, undefined, { id: 'java', name: 'Java' }, false, false]
+  const state = [workbench, 'talent_sourcing', Date.now(), '', '', '', {}, '', false, undefined, { id: 'java', name: 'Java' }, false]
   const refs = []; let index = 0, refIndex = 0, page, rejectStart
   const calls = []
   const job = { id: 'returned', kind: 'talent_sourcing', status: 'running' }
@@ -88,7 +88,13 @@ test('normal startup never shows reconciliation; a lost response retains the sam
     return { ...job, id: request.id }
   }
   const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === 'object' ? [tree, ...nodes(tree.props?.children)] : []
-  const render = () => { index = 0; refIndex = 0; return nodes(page({ rpc })).find(node => typeof node.props?.onReconcile === 'function').props }
+  const render = () => {
+    index = 0; refIndex = 0
+    const tree = nodes(page({ rpc }))
+    assert.equal(tree.some(node => node.type === 'button' && [].concat(node.props.children).includes('简历入库')), false)
+    assert.equal(tree.some(node => node.props?.title === '简历入库'), false)
+    return tree.find(node => typeof node.props?.onReconcile === 'function').props
+  }
   render().onStart({ jobId: 'java' })
   const starting = render()
   assert.equal(starting.busy, '启动任务'); assert.equal(starting.pending, false); assert.equal(starting.locked, true)

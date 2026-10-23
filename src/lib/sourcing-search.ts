@@ -12,18 +12,18 @@ export const sourcingEducationLevels = (value: string): string[] => {
 }
 const fieldLabels = { city: /城市|地区|地点/, experience: /经验|工作年限/, education: /学历|教育/ }
 export function deriveSourcingSearchFilters(position: SourcingPosition, supplement: string): SourcingSearchFilters {
-  const hardClauses = (value: string) => value.split(/[\n，。；;]/).filter(clause => !/优先|加分|最好|倾向|preferred|nice.to.have/i.test(clause)).join('\n')
+  const hardClauses = (value: string) => String(value ?? '').split(/[\n，。；;]/).filter(clause => !/优先|加分|最好|倾向|preferred|nice.to.have/i.test(clause)).join('\n')
   const text = hardClauses(position.description), requiredSupplement = hardClauses(supplement)
   const totalExperience = (value: string) => value.split('\n').filter(clause => !/上一段|上家|任职|每段/.test(clause)).join('\n')
   const experience = /(?:工作经验|工作年限|经验要求)[：:]\s*([^\n，。；]+)/.exec(totalExperience(requiredSupplement))?.[1]
     || /\d+\s*(?:[-–—~～至到]\s*\d+\s*年|年(?:及)?以上|年以下)/.exec(totalExperience(requiredSupplement))?.[0]
-    || position.searchFields?.experience || /(?:工作经验|工作年限|经验要求)[：:]\s*([^\n，。；]+)/.exec(text)?.[1]
+    || position.basicRequirements?.experience || position.searchFields?.experience || /(?:工作经验|工作年限|经验要求)[：:]\s*([^\n，。；]+)/.exec(text)?.[1]
     || /\d+\s*(?:[-–—~～至到]\s*\d+\s*年|年以上|年以下)/.exec(text)?.[0]
   const education = /(?:学历要求|学历)[：:]\s*([^\n，。；]+)/.exec(requiredSupplement)?.[1]
     || /(博士|硕士|本科|大专|高中|中专)(?:及以上|以上)/.exec(requiredSupplement)?.[0]
-    || position.searchFields?.education || /(?:学历要求|学历)[：:]\s*([^\n，。；]+)/.exec(text)?.[1]
+    || position.basicRequirements?.education || position.searchFields?.education || /(?:学历要求|学历)[：:]\s*([^\n，。；]+)/.exec(text)?.[1]
     || /(博士|硕士|本科|大专|高中|中专)(?:及以上|以上)/.exec(text)?.[0]
-  const city = /(?:工作地点|工作城市|期望城市)[：:]\s*([^\n，。；]+)/.exec(requiredSupplement)?.[1] || position.searchFields?.city || position.city
+  const city = /(?:工作地点|工作城市|期望城市)[：:]\s*([^\n，。；]+)/.exec(requiredSupplement)?.[1] || position.basicRequirements?.city || position.searchFields?.city || position.city
   return { ...(!/不限|无要求/.test(city || '') && city ? { city: city.trim() } : {}),
     ...(!/不限/.test(experience || '') && experience ? { experience: experience.trim() } : {}),
     ...(!/不限/.test(education || '') && education ? { education: education.trim() } : {}) }
@@ -112,7 +112,7 @@ export function verifySourcingSearchPosition(page: any, job: SourcingJob, platfo
   const valueSelected = !statesOf(item).includes('expanded') && (selectedTrigger || item.role === 'combobox' && !!item.tagName && String(item.tagName).toLowerCase() !== 'input' && !!item.value
     || item.role === 'button' && hasSourcingPositionSelector({ items: [item] }) && !/不限职位|选择职位|请选择/.test(normalized(item.name)))
   const adapted = valueSelected ? { ...page, items: page.items.map((row: any) => row.ref === item.ref ? { ...row, name: `${row.name || ''} ${row.value || ''}`.trim(), states: [...statesOf(row), 'selected'] } : row) } : page
-  const outcome = verifyPositionEvidence(adapted, { jobId:job.jobId,jobName:job.position?.name || job.jobName,platformJobs:job.platformJobs?.[platform] } as GreetingJob, proof)
+  const outcome = verifyPositionEvidence(adapted, { platform, jobId:job.jobId,jobName:job.position?.name || job.jobName,platformJobs:job.platformJobs?.[platform] } as GreetingJob, proof)
   if (!outcome.ok) throw new Error(`SOURCING_POSITION_SELECTION_REQUIRED: ${outcome.error}`)
   return outcome.verification
 }

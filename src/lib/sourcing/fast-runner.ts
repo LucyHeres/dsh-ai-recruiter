@@ -23,8 +23,9 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
   let modelMs = 0, turns = 0
   let failedState: string | undefined
   let lastHandoff: string | undefined
+  let unreadableResumes = 0
   const seen = new Set<string>()
-  const driver = platform.createSourcingDriver?.({ ...context, signal })
+  const driver = platform.createSourcingDriver?.({ ...context, signal, progress: operations.progress })
   let prepared = false
   const scopedAgent: BrowserAgentRunner = async options => {
     const result = await agent({ ...options, signal: AbortSignal.any([signal, options.signal]),
@@ -84,7 +85,7 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
       return { hostState, requirements: context.job.requirements, observation, processedCandidateKeys: [...seen].slice(-80),
         capturedResume: captured && { name: captured.name, characters: captured.text.length, scope: captured.scope },
         next: hostState.pending
-          ? '候选人已完成列表初筛并处于待处理状态。hostState.selectedCandidate 是当前人选的稳定身份和列表依据；定位同一人的姓名入口打开详情，再读取、评估和保存。不要再次选择或替换候选人；确实无法定位时调用sourcing_skip_candidate后继续。'
+          ? '候选人已完成列表初筛并处于待处理状态。hostState.selectedCandidate 是当前人选的稳定身份和列表依据；按当前平台的简历入口（链接或明确的查看控件）打开同一人的详情，再读取、评估和保存。姓名文本本身不一定是入口，找不到可验证的入口时不要反复点击同一节点，按平台提示停止并说明。不要再次选择或替换候选人；确实无法定位时调用sourcing_skip_candidate后继续。'
           : hostState.needsGreeting ? '当前人选已保存，先核对并完成同一人的招呼；不能重选、跳过或重发结果未知的动作。'
           : '本轮已处理的候选标识在processedCandidateKeys中。只处理当前可见的新人；duplicate=true不需要再调用skip。当前屏都已处理时，滚动实际候选列表或准备好页面后调用sourcing_collect。不要反复选择旧人；不得重发结果未知的动作。' }
     },
@@ -112,7 +113,20 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
           if (returned) await execute('sourcing_confirm_search', returned)
         }
         const finishSelected = async (name: string, candidateSource: string, locator: ResumeLocator) => {
-          await execute('sourcing_read_resume', locator)
+          try { await execute('sourcing_read_resume', locator) }
+          catch (error) {
+            // A known, owned detail whose transcription is incomplete can be
+            // abandoned safely. Provider failures and uncertain inputs remain fatal.
+            if (!driver.hasOpenResume?.(name) || !/^RESUME_IMAGE_(?:UNREADABLE|TRANSCRIPTION_INVALID|INCOMPLETE)(?::|$)/.test(error instanceof Error ? error.message : '')) throw error
+            await execute('sourcing_skip_candidate', { reason: '简历图片未完整识别，未保存，继续寻找下一位候选人' })
+            await returnToList()
+            unreadableResumes++
+            log('resume_unreadable', { consecutive: unreadableResumes, skipped: true })
+            if (unreadableResumes >= 3) throw new Error('RESUME_IMAGE_REPEATED_UNREADABLE: 连续 3 位候选人的简历图片未完整识别，已停止；请检查图片读取能力，已有结果保留')
+            await operations.progress?.(`候选人[${name}]简历图片未完整识别，已跳过，正在继续寻聘`)
+            return
+          }
+          unreadableResumes = 0
           const captured = operations.captured()
           if (!captured?.text || captured.scope !== 'online') throw new SourcingHandoff('resume_detail_incomplete')
           const sourceId = hash({ candidate: operations.state().selectedCandidate?.candidateKey ?? candidateSource, text: captured.text })
@@ -130,16 +144,35 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
           await returnToList()
         } else if (state.pending) {
           if (!selected) throw new SourcingHandoff('unfinished_candidate')
-          let locator: ResumeLocator
-          if (context.broker.currentPage()?.dialogs?.length) locator = await driver.resume(selected.name)
-          else {
-            const cards = await driver.cards()
-            const matching = cards.filter(card => card.sourceId === selected.candidateKey || card.name === selected.name
-              && !!selected.verifiedListText && card.text === selected.verifiedListText)
-            if (matching.length !== 1) throw new SourcingHandoff('selected_card_changed')
-            locator = await driver.open(matching[0]!)
+          let locator: ResumeLocator | undefined
+          if (driver.hasOpenResume?.() && !driver.hasOpenResume(selected.name)) await returnToList()
+          if (context.broker.currentPage()?.dialogs?.length || driver.hasOpenResume?.(selected.name)) {
+            try { locator = await driver.resume(selected.name) }
+            catch (error) { if (!(error instanceof SourcingHandoff && error.reason === 'resume_closed')) throw error }
           }
-          await finishSelected(selected.name, selected.candidateKey, locator)
+          if (!locator) {
+            const cards = await driver.cards()
+            const matching: SourcingCard[] = []
+            for (const card of cards.filter(card => card.name === selected.name)) {
+              // Driver text is a raw card view; selection uses verified source
+              // parts and its own key. Compare those same sources on recovery.
+              const preview = await operations.preview(card, signal)
+              const sameEvidence = selected.listEvidenceHash ? hash(preview.text) === selected.listEvidenceHash
+                : !!selected.verifiedListText && preview.text === selected.verifiedListText
+              if (!preview.duplicate && sameEvidence && (preview.candidateKey === undefined || preview.candidateKey === selected.candidateKey)) matching.push(card)
+            }
+            if (matching.length === 1) locator = await driver.open(matching[0]!)
+            else {
+              await execute('sourcing_skip_candidate', { reason: '已选候选人的列表依据已变化或无法唯一定位，未保存，继续寻找下一位候选人' })
+              log('selected_card_unavailable', { matchingCount: matching.length, skipped: true })
+              await returnToList()
+            }
+          }
+          if (locator) await finishSelected(selected.name, selected.candidateKey, locator)
+        } else if (driver.hasOpenResume?.()) {
+          // An explicit skip discards the selected source, not its UI modal.
+          // Return through the owning driver before looking for the next card.
+          await returnToList()
         }
         if (!prepared || !operations.state().searchReady) {
           if (operations.state().pending || operations.state().needsGreeting) throw new SourcingHandoff('unfinished_candidate')
@@ -172,7 +205,7 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
             }
             continue
           }
-          await operations.progress?.(`正在对当前可见的 ${cards.length} 位候选人进行列表初筛`)
+          await operations.progress?.(`正在对当前可见的 ${cards.length} 位候选人进行列表初筛：${cards.map(card => `候选人[${card.name}]`).join('、')}`)
           log('preview_batch', { count: cards.length, remaining: operations.remaining() })
           const assessments = await evaluateSources(scopedAgent, context.job.requirements!, cards, signal, fallback.logger, 'preview', candidateFilters)
           for (const capturedCard of cards) {

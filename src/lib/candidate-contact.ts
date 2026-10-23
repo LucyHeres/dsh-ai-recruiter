@@ -12,13 +12,13 @@ export interface CandidateContact {
   checkedAt: string
   source: 'chat' | 'received_list'
 }
-type Candidate = Pick<SourcingCandidate, 'key' | 'platform' | 'profileUrl' | 'platformIdentity'>
+type Candidate = Pick<SourcingCandidate, 'key' | 'platform' | 'profileUrl' | 'platformIdentity' | 'identityAliases'>
 
 export function candidateContactKeys(candidate: Candidate): string[] {
   return [...new Set([
     ...(candidate.platformIdentity ? [platformIdentityKey(candidate.platform, candidate.platformIdentity)] : []),
     ...(candidate.profileUrl ? [hash([candidate.platform, candidate.profileUrl])] : []),
-    `${candidate.platform}:candidate:${candidate.key}`,
+    ...[candidate.key, ...(candidate.identityAliases ?? [])].map(key => `${candidate.platform}:candidate:${key}`),
   ])]
 }
 

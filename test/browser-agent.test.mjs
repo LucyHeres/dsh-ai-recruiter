@@ -43,6 +43,16 @@ function options(tools, extra = {}) {
     signal: new AbortController().signal, maxTurns: 10, maxDurationMs: 5000, ...extra }
 }
 
+test('raw images require host admission and cannot silently become a text-only request', async () => {
+  const llm = model([])
+  const output = await runBrowserAgent(llm, route, options([], {
+    inputImages: [{ data: new Uint8Array([1, 2, 3]), mediaType: 'image/png' }],
+  }))
+  assert.equal(output.status, 'stopped')
+  assert.match(output.message, /BROWSER_AGENT_IMAGE_ADMISSION_REQUIRED/)
+  assert.equal(llm.requests.length, 0)
+})
+
 test('actual native schemas and route pass through; a new ordinary error returns to the model to choose another path', async () => {
   let complete = false
   const executed = [], schema = { type: 'object', properties: { invented: { type: 'string' } }, required: ['invented'] }

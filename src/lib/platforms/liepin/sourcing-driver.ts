@@ -15,6 +15,7 @@ import { greetingLabels, completedGreetingLabels } from '../../recruitment-contr
 import { sourcingMode, isSourcingEntry } from '../../sourcing/source.js'
 import { liepinDefinition } from './definition.js'
 import { recommendationFilterDialog, recommendationFilterLabel } from './recommendation-controls.js'
+import { dismissLiepinPromotion } from './promotion-overlay.js'
 
 const readable = (item: any) => item.ref && !statesOf(item).some(s => ['hidden', 'invisible', 'blocked_by_dialog'].includes(s))
 const inViewport = (item: any, page: any) => {
@@ -45,7 +46,7 @@ export class LiepinSourcingDriver implements SourcingDriver {
     this.evidence = new LiepinSearchEvidence(context.broker)
     this.names = (context.job.platformJobs?.liepin?.length ? context.job.platformJobs.liepin.map(j => j.name) : [context.job.jobName || '']).map(normalized)
     this.recommendation = sourcingMode(context.job) === 'recommend'
-    this.entry = this.recommendation ? liepinDefinition.sourcingEntry : liepinDefinition.sourcingSearchEntry
+    this.entry = this.recommendation ? liepinDefinition.sourcingEntry : liepinDefinition.sourcingSearchEntry ?? liepinDefinition.sourcingEntry
   }
   private page() {
     const page = this.browser.page()
@@ -108,6 +109,7 @@ export class LiepinSourcingDriver implements SourcingDriver {
   }
   async prepareSearch(): Promise<SearchConfirmation> {
     this.page()
+    await dismissLiepinPromotion(this.browser, this.context.progress)
     if (this.recommendation) return this.prepareRecommendation()
     if (this.page().dialogs?.length) await this.returnToList()
     await this.revealSearchHeader()
@@ -181,8 +183,8 @@ export class LiepinSourcingDriver implements SourcingDriver {
       // retains context. Verify a single named selection without parsing DOM IDs.
       const tabs = (this.page().selectedTabs ?? []).map((tab: any, index: number) => ({ ...tab, ref: `selected-position-${index}`, role: 'tab', states: ['selected'] }))
       const contextPage = { ...this.page(), items: tabs, selectedTabs: [] }
-      const matching = tabs.filter((tab: any) => targets.some(target => positionNameMatches(contextPage, tab, target.name)))
-      if (matching.length !== 1 || !verifyPositionEvidence(contextPage, { jobId: this.context.job.jobId, jobName: this.context.job.jobName, platformJobs: this.context.job.platformJobs?.liepin }, { ref: matching[0].ref }).ok) {
+      const matching = tabs.filter((tab: any) => targets.some(target => positionNameMatches(contextPage, tab, target.name, liepinDefinition.positionAlias)))
+      if (matching.length !== 1 || !verifyPositionEvidence(contextPage, { platform: 'liepin', jobId: this.context.job.jobId, jobName: this.context.job.jobName, platformJobs: this.context.job.platformJobs?.liepin }, { ref: matching[0].ref }).ok) {
         throw new SourcingHandoff('filter_position_context_unverified')
       }
     } else if (this.page().dialogs?.length) throw new SourcingHandoff('recommendation_dialog_requires_interpretation')
@@ -195,7 +197,7 @@ export class LiepinSourcingDriver implements SourcingDriver {
       const page = this.page(), targets = this.context.job.platformJobs?.liepin?.length ? this.context.job.platformJobs.liepin : [{ id: '', name: this.context.job.jobName || '' }]
       const options = controls.filter(control => control.kind === 'job_option' && control.active)
         .map(control => page.items.find((item: any) => item.ref === control.ref))
-      await this.browser.click(requireSingle<any>(positionChoices(page, options, targets), 'recommendation_job_choices_ambiguous').ref)
+      await this.browser.click(requireSingle<any>(positionChoices(page, options, targets, undefined, liepinDefinition.positionAlias), 'recommendation_job_choices_ambiguous').ref)
     }
     if (!ready) throw new SourcingHandoff('recommendation_position_unverified')
     const expected = this.context.job.searchFilters ?? {}
@@ -233,6 +235,7 @@ export class LiepinSourcingDriver implements SourcingDriver {
     return proof
   }
   async cards(options: { refresh?: boolean } = {}): Promise<SourcingCard[]> {
+    await dismissLiepinPromotion(this.browser, this.context.progress)
     const current = this.page()
     if (options.refresh === false) {
       if (this.cardView && this.cardView.page === current) return this.cardView.cards
@@ -246,6 +249,7 @@ export class LiepinSourcingDriver implements SourcingDriver {
     // Infinite lists append below the DOM budget. Always read the current
     // viewport first, otherwise every scroll can return the same old prefix.
     await this.browser.snapshot('dom', true)
+    await dismissLiepinPromotion(this.browser, this.context.progress)
     // Search submission can precede asynchronous results. Wait only while no
     // result/end component exists, with bounded cancellable observation.
     for (const ms of [200, 400, 800, 1600, 2400]) {

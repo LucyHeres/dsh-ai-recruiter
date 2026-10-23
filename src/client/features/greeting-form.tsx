@@ -35,10 +35,12 @@ export function GreetingForm({ state, locked, busy, pending, blockingReason, loa
   const [ageUnder, setAgeUnder] = useState('')
   const [experienceMin, setExperienceMin] = useState('')
   const [experienceMax, setExperienceMax] = useState('')
-  useEffect(() => { if (platform !== 'liepin') setMode('recommend') }, [platform])
+  // 是否有搜索入口来自共享平台元数据，UI 不按平台名分支。
+  const searchSupported = !!PLATFORMS[platform].searchUrl
+  useEffect(() => { if (!searchSupported) setMode('recommend') }, [platform, searchSupported])
   const optionalNumber = (value: string) => value.trim() ? Number(value) : undefined
   const validNumber = (value: string, min: number, max: number) => !value.trim() || Number.isInteger(Number(value)) && Number(value) >= min && Number(value) <= max
-  const validSearch = mode !== 'search' || platform === 'liepin' && !!searchKeyword.trim()
+  const validSearch = mode !== 'search' || searchSupported && !!searchKeyword.trim()
     && validNumber(ageUnder, 18, 100) && validNumber(experienceMin, 0, 60) && validNumber(experienceMax, 0, 60)
     && (!experienceMin || !experienceMax || Number(experienceMin) <= Number(experienceMax))
   const login = usePlatformLogin(platform, !!state?.connection.ready, locked, checkLogin)
@@ -80,7 +82,7 @@ export function GreetingForm({ state, locked, busy, pending, blockingReason, loa
             <div className={`air-number-field ${!validLimit ? 'is-invalid' : ''}`}><input id="air-limit" type="number" min={1} max={100} step={1} value={Number.isNaN(limit) ? '' : limit} disabled={locked || checking} aria-invalid={!validLimit} aria-describedby="air-limit-hint" onChange={event => setLimit(event.target.value === '' ? NaN : Number(event.target.value))} /><span>人</span></div>
           </div>
 
-          {platform === 'liepin' && <div className="air-field">
+          {searchSupported && <div className="air-field">
             {mode === 'search' ? <FieldLabel htmlFor="air-greeting-mode" hintId="air-search-hint" invalid={!validSearch} hint={validSearch ? 'AI 设置并核对筛选条件后，由平台预设连续处理；无法准确设置的条件不会静默忽略。' : '请填写搜索关键词，并核对年龄和工作经验范围。'}>候选人来源</FieldLabel> : <label className="air-label" htmlFor="air-greeting-mode">候选人来源</label>}
             <div className="air-select-wrap"><select id="air-greeting-mode" value={mode} disabled={locked || checking} onChange={event => setMode(event.target.value as 'recommend' | 'search')}><option value="recommend">人才推荐</option><option value="search">搜索人才并筛选</option></select><ChevronDownIcon aria-hidden="true" /></div>
             {mode === 'search' && <>

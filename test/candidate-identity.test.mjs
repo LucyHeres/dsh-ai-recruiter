@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { liepinCandidateIdentity } from '../dist/lib/platforms/liepin/candidate-identity.js'
 import { greetingOutcome, sameGreetingIdentity, platformIdentityKey } from '../dist/lib/candidate-identity.js'
+import { bossCandidateTextIdentity } from '../dist/lib/platforms/boss/candidate-identity.js'
+import { hash } from '../dist/lib/store.js'
 const identity = id => ({kind:'resume',id,source:'card_class'})
 const wrapper = id => ({attributes:{class:`newResumeItemWrap--YmIxZ xpath-resume-item-wrap xpath-resume-item-wrap-${id}`}})
 const page = {url:'https://lpt.liepin.com/recommend'}
@@ -29,4 +31,23 @@ test('legacy success is recorded; explicit unknown and dispatched failures remai
  assert.equal(greetingOutcome({stage:'failed',attemptedAt:'past'}),'uncertain')
  assert.equal(greetingOutcome({stage:'sending',candidateKey:'queued'}),undefined)
  assert.equal(greetingOutcome({stage:'sending',candidateKey:'queued',attemptedAt:'past'}),'uncertain')
+})
+
+test('BOSS full-card text identity excludes trailing contact state and retains exact legacy hashes', () => {
+ const body='8-10K 李哲 24岁 1年经验 本科 期望 上海 客户经理 优势 熟悉客户维护 2025.01 至今 甲公司 客户经理 2020 2024 某大学 本科'
+ const before=bossCandidateTextIdentity(body+' 打招呼'), after=bossCandidateTextIdentity(body+' 继续沟通')
+ assert.equal(before.canonical,body);assert.equal(after.canonical,body)
+ assert.equal(bossCandidateTextIdentity(body+' 刚刚活跃 打招呼').canonical,body)
+ for(const legacy of [body+' 打招呼',body+' 继续沟通']) {
+  assert.ok(before.aliases.includes(legacy));assert.ok(after.aliases.includes(legacy))
+ }
+ const candidateKeys=after.aliases.map(identity=>hash({platform:'boss',identity}))
+ assert.ok(candidateKeys.includes(hash({platform:'boss',identity:body+' 打招呼'})))
+ assert.ok(candidateKeys.includes(hash({platform:'boss',identity:body+' 继续沟通'})))
+ const row={key:hash(['boss',after.canonical]),identityAliases:after.aliases.map(text=>hash(['boss',text]))}
+ assert.equal(sameGreetingIdentity(row,{key:hash(['boss',body+' 打招呼']),stage:'unknown'}),true)
+ assert.equal(greetingOutcome({stage:'unknown'}),'uncertain')
+ assert.notEqual(bossCandidateTextIdentity(body.replace('甲公司','乙公司')+' 打招呼').canonical,before.canonical)
+ assert.notEqual(bossCandidateTextIdentity(body.replace('1年经验','3年经验')+' 打招呼').canonical,before.canonical)
+ assert.equal(bossCandidateTextIdentity(body+' 负责打招呼和继续沟通模块开发').canonical,body+' 负责打招呼和继续沟通模块开发')
 })

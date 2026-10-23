@@ -126,3 +126,26 @@ test('communication status follows the observed resume ID across tasks without m
  assert.equal(candidateCommunication({key:'new-key',platform:'liepin',profileUrl:'',platformIdentity:{...platformIdentity,id:'anotherResume456'}},records),'none')
  assert.equal(candidateCommunication({key:'new-key',platform:'boss',profileUrl:'',platformIdentity},records),'none')
 })
+
+test('corrected BOSS candidate aliases retain communication and resume receipt while two raw greeting receipts count one person',async()=>{
+ const {positionOverview}=await import('../dist/lib/position-overview.js')
+ const {candidateResumeReceipt,candidateContactKeys}=await import('../dist/lib/candidate-contact.js')
+ const person={key:'canonical',identityAliases:['before-greeting','after-greeting'],name:'李哲',platform:'boss',profileUrl:'',score:68,scope:'online',fields:[],collectedAt:'now'}
+ const greetings=[{key:'receipt-1',candidateKey:'before-greeting',platform:'boss',stage:'succeeded',clickedAt:'past'},
+  {key:'receipt-2',candidateKey:'after-greeting',platform:'boss',stage:'skipped',knownContacted:true}]
+ const job={id:'round',kind:'talent_sourcing',platform:'boss',jobId:'sales',createdAt:'2026-10-23',updatedAt:'now',status:'stopped',limit:2,channels:[],candidates:[person],greetings,results:[]}
+ const original=JSON.stringify(greetings), records=communicationIndex([job])
+ assert.equal(candidateCommunication(person,records),'recorded')
+ assert.equal(candidateCommunication({...person,platform:'liepin'},records),'none')
+ assert.equal(candidateCommunication({...person,key:'another-person',identityAliases:[]},records),'none')
+ assert.ok(candidateContactKeys(person).includes('boss:candidate:before-greeting'))
+ assert.deepEqual(candidateResumeReceipt(person,[{platform:'boss',identityKeys:['boss:candidate:before-greeting'],resumeReceivedAt:'past'}]),{resumeReceived:true,resumeReceivedAt:'past'})
+ const overview=positionOverview([{id:'sales',name:'客户经理'}],[job])[0]
+ assert.equal(overview.candidateCount,1);assert.equal(overview.greetedCount,1)
+ const results=sourcingResults([job],'sales','all',records)
+ assert.equal(results.candidates.length,1);assert.equal(results.current.candidateCount,1)
+ assert.equal(results.candidates[0].communication,'recorded')
+ assert.equal(JSON.stringify(greetings),original,'raw receipts must remain untouched')
+ const other={...person,key:'another-person',identityAliases:[]}
+ assert.equal(positionOverview([{id:'sales',name:'客户经理'}],[{...job,candidates:[person,other],greetings:[...greetings,{key:'receipt-3',platform:'boss',candidateKey:other.key,stage:'succeeded',clickedAt:'past'}]}])[0].greetedCount,2)
+})

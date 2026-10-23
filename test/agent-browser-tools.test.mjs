@@ -49,6 +49,22 @@ function fixture(extra = [], handler, overrides = {}) {
   return { broker, calls, controller, execute: (name, args) => tool(broker, name).execute(args, controller.signal) }
 }
 
+test('iframe refresh and automatic post-scroll observation retain the current frame until an explicit top-level read', async () => {
+  const f = fixture([info('browser_scroll', schema({ tabId: { type: 'integer' }, deltaY: { type: 'integer' } }), false)], async (name, args) =>
+    name === 'browser_snapshot' ? { ...page('s' + args.frameId), frameId: args.frameId ?? 0,
+      frameInteraction: 'same-origin', tabUrl: origin + '/outer?token=secret' } : { dispatched: true })
+  const snapshot = await f.execute('browser_snapshot', { tabId: 7, frameId: 3 })
+  assert.equal(snapshot.frameInteraction, 'same-origin')
+  assert.equal(snapshot.tabUrl, origin + '/outer')
+  await f.execute('browser_snapshot', { tabId: 7 })
+  assert.equal(f.calls.at(-1).args.frameId, 3)
+  await f.execute('browser_scroll', { tabId: 7, deltaY: 500 })
+  assert.equal(f.calls.at(-1).name, 'browser_snapshot')
+  assert.equal(f.calls.at(-1).args.frameId, 3)
+  await f.execute('browser_snapshot', { tabId: 7, frameId: 0 })
+  assert.equal(f.broker.currentPage().frameId, 0)
+})
+
 test('new MCP schemas are preserved without a core action enum, and host-owned fields cannot be model-controlled', async () => {
   const inputSchema = schema({ tabId: { type: 'integer' }, nextShape: { type: 'object', properties: { values: { type: 'array', items: { type: 'integer' }, minItems: 2 } }, required: ['values'], additionalProperties: false },
     policy: { type: 'object' }, documentId: { type: 'string' } })

@@ -365,7 +365,10 @@ test('failed preflight returns its verified source for correction and rejects an
   }, { splitEvidence: true })
   assert.equal(out.job.candidates.length, 0)
   assert.equal(out.job.scanned, 1); assert.equal(out.job.status, 'stopped')
-  assert.doesNotMatch(JSON.stringify(out.job), /学历[:：]本科|陈先生/)
+  assert.doesNotMatch(JSON.stringify(out.job), /学历[:：]本科/)
+  const { events, ...record } = out.job
+  assert.doesNotMatch(JSON.stringify(record), /陈先生/)
+  assert.ok(events.some(event => /候选人\[陈先生\]列表初筛通过/.test(event.message)))
 })
 
 test('expanded list evidence still recognizes candidates recorded with legacy identity hashes', async () => {
@@ -646,10 +649,10 @@ test('minimum score is validated, defaults to 60, and accepts both 0 and 100',()
  for(const minimumScore of [0,30,100])assert.equal(sourcingStartSpec.parse({...input,minimumScore}).minimumScore,minimumScore)
  for(const minimumScore of [-1,101,30.5,'30',null,NaN])assert.equal(sourcingStartSpec.safeParse({...input,minimumScore}).success,false)
 })
-test('configured threshold governs detail persistence and greeting without changing list screening',async()=>{
+for(const minimumScore of [30,6]) test(`configured threshold ${minimumScore} governs detail persistence and greeting without changing list screening`,async()=>{
  const partial=[{...assessments[0],state:'partial'},assessments[1]]
  const out=await fixture(async tools=>{
-  assert.equal(tools.opts.goal.minimumScore,30);assert.ok(!tools.opts.system.includes('低于60分'))
+  assert.equal(tools.opts.goal.minimumScore,minimumScore);assert.ok(!tools.opts.system.includes('低于60分'))
   await search(tools)
   const selected=await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],assessments:partial})
   assert.equal(selected.qualified,true);assert.equal(selected.score,100)
@@ -657,9 +660,31 @@ test('configured threshold governs detail persistence and greeting without chang
   const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:partial,analysis:'部分符合'})
   assert.equal(saved.recorded,1)
   await greet(tools,saved.candidateKey)
- },{minimumScore:30,autoGreet:true,logging:true})
- assert.equal(out.job.minimumScore,30);assert.equal(out.job.candidates[0].score,50);assert.ok(out.calls.includes('greeting_click'))
+ },{minimumScore,autoGreet:true,logging:true})
+ assert.equal(out.job.minimumScore,minimumScore);assert.equal(out.job.candidates[0].score,50);assert.ok(out.calls.includes('greeting_click'))
  assert.equal(out.diagnostics.find(row=>row.event==='sourcing.candidate_preflight').minimumScore,undefined)
+})
+
+test('fixed fields fill an omitted experience check before opening details even at a six-point threshold', async () => {
+ const jobPosition={...position,basicRequirements:{experience:'1–3年',education:'大专',city:'上海'},
+  searchFields:{experience:'1–3年',education:'大专',city:'上海'},description:position.description+'；3年以上相关软件开发经验；本科及以上学历'}
+ const body='陈先生，6年工作经验，大专学历，期望工作城市上海，Java 后端开发，负责订单系统。'
+ const out=await fixture(async tools=>{
+  tools.setBody(body);await tools.execute('browser_snapshot',{tabId:1})
+  const resolved=await tools.execute('sourcing_define_requirements',{keyword:'Java',criteria})
+  assert.deepEqual(resolved.listCriteria.map(row=>[row.field,row.requirement]),[['city','上海'],['experience','1–3年'],['education','大专及以上']])
+  await tools.execute('sourcing_confirm_search',{...tools.identity(),ref:'position',mode:'position',filters:[]})
+  const selected=await tools.execute('sourcing_select_candidate',{...tools.identity(),ref:'card',name:'陈先生',evidenceRefs:[],
+   listAssessments:resolved.listCriteria.map(row=>({field:row.field,state:row.field==='experience'?'mismatch':'match',quote:body,reason:row.field==='experience'?'6年超出固定字段1–3年':'原文符合固定字段'}))})
+  assert.equal(selected.qualified,false);assert.equal(selected.requiredCount,3);assert.equal(selected.matchedCount,2)
+  await assert.rejects(tools.openResume(),/PREFLIGHT_REQUIRED/)
+  await finishExhausted(tools,'平台已无更多结果')
+ },{position:jobPosition,sourceMode:'recommend',minimumScore:6,logging:true,
+  listCriteria:[{field:'education',requirement:'本科及以上',quote:'本科及以上学历'},{field:'city',requirement:'上海',quote:'上海'}]})
+ assert.equal(out.job.minimumScore,6);assert.equal(out.job.skippedByFilters,1);assert.equal(out.job.skippedLowScore,0)
+ assert.equal(out.job.candidates.length,0)
+ assert.match(out.job.events.find(row=>row.message.includes('列表初筛 2/3')).message,/工作经验年限不符合.*1–3年.*6年/)
+ assert.match(out.job.detail,/已初筛 1 人，已保存 0 人/)
 })
 test('raising the detail threshold never blocks a qualified list card, but rejects its low final score',async()=>{
  const high=await fixture(async tools=>{await search(tools);assert.equal((await select(tools)).qualified,true);await tools.openResume();const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:[{...assessments[0],state:'partial'},assessments[1]],analysis:'部分符合'});assert.equal(saved.skipped,true);await finishExhausted(tools, '平台确认没有更多结果')},{minimumScore:80})
@@ -680,7 +705,7 @@ test('raising the detail threshold never blocks a qualified list card, but rejec
  },{minimumScore:0})
  assert.equal(zero.job.candidates[0].score,0)
 })
-test('unknown required list evidence skips without retaining personal information or opening details',async()=>{
+test('unknown required list evidence logs the candidate name but retains no resume or result and cannot open details',async()=>{
  const out=await fixture(async tools=>{
   await search(tools)
   await assert.rejects(tools.execute('browser_click',{...tools.identity(),ref:'detail'}),/PREFLIGHT_REQUIRED/)
@@ -691,7 +716,10 @@ test('unknown required list evidence skips without retaining personal informatio
   await finishExhausted(tools, '平台确认没有更多结果')
  })
  assert.equal(out.job.candidates.length,0);assert.equal(out.job.results.length,0);assert.equal(out.job.skippedUnverified,1)
- assert.doesNotMatch(JSON.stringify(out.job),/陈先生|订单服务/)
+ const {events,...record}=out.job
+ assert.doesNotMatch(JSON.stringify(record),/陈先生|订单服务/)
+ assert.doesNotMatch(JSON.stringify(events),/订单服务/)
+ assert.ok(events.some(event=>/候选人\[陈先生\]列表初筛.*尚无法确认/.test(event.message)))
 })
 
 for (const sourceMode of ['recommend', 'search']) test(sourceMode+' list screening requires all four JD conditions and never uses the detail threshold', async () => {
@@ -741,7 +769,7 @@ test('no explicit basic-information requirements allows detail reading despite z
   assert.equal(selected.qualified,true);assert.equal(selected.requiredCount,0);assert.equal(selected.score,null)
   await tools.openResume()
   await tools.execute('sourcing_finish',{status:'stopped',reason:'不限制列表条件，进入详情评估'})
- },{listCriteria:[],minimumScore:100})
+ },{position:{...position,city:''},listCriteria:[],minimumScore:100})
  assert.equal(out.job.status,'stopped',out.job.detail)
 })
 test('missing core evidence is retained for review without greeting or consuming a qualified quota',async()=>{

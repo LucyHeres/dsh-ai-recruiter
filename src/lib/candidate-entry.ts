@@ -44,13 +44,16 @@ function isNavigationLabel(identity: string): boolean {
   return false
 }
 
-/** 姓名：优先"X先生/女士/同学"，其次"两字以上姓名 + 年龄/学历"开头。 */
+const nonNames = new Set(['本科', '硕士', '博士', '大专', '中专', '高中', '应届', '在职', '离职', '面议', '不限'])
+/** 姓名：优先"X先生/女士/同学"；BOSS 卡片以薪资开头，姓名紧挨年龄。 */
 function readName(body: string): string | null {
   const titled = /([\u4e00-\u9fa5A-Za-z·]{1,12}(?:先生|女士|同学))/.exec(body)
   if (titled) return titled[1]
-  const leading = /^([\u4e00-\u9fa5A-Za-z·]{2,12})(?=\s|\d)/.exec(body)
+  const beforeAge = /(?:^|\s)([\u4e00-\u9fa5A-Za-z·]{2,12})\s+(?=\d{2}\s*岁)/.exec(body)
+  if (beforeAge && !nonNames.has(beforeAge[1])) return beforeAge[1]
+  const leading = /^(?:(?:\d+(?:\.\d+)?-\d+(?:\.\d+)?[Kk]|面议)\s+)?([\u4e00-\u9fa5A-Za-z·]{2,12})(?=\s|\d)/.exec(body)
   // 纯数字/纯符号前缀不是姓名。
-  return leading && /[\u4e00-\u9fa5A-Za-z]/.test(leading[1]) ? leading[1] : null
+  return leading && !nonNames.has(leading[1]) && /[\u4e00-\u9fa5A-Za-z]/.test(leading[1]) ? leading[1] : null
 }
 
 /** 学历：页面给出的最高一项。 */

@@ -27,7 +27,7 @@ export function communicationIndex(jobs: WorkbenchJob[], contacts: CandidateCont
   return index
 }
 export function candidateCommunication(candidate: SourcingCandidate, index: ReturnType<typeof communicationIndex>): NonNullable<SourcingCandidate['communication']> {
-  const direct = index.get(`${candidate.platform}:candidate:${candidate.key}`)
+  const direct = [candidate.key, ...(candidate.identityAliases ?? [])].map(key => index.get(`${candidate.platform}:candidate:${key}`)).find(Boolean)
   if (direct) return direct
   if (candidate.platformIdentity) return index.get(platformIdentityKey(candidate.platform, candidate.platformIdentity)) ?? 'none'
   if (!candidate.profileUrl) return 'none'

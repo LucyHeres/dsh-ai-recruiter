@@ -32,9 +32,12 @@ export class SourcingGreeting {
     && call.args.tabId === this.authorized.tabId && call.args.snapshotId === this.authorized.snapshotId && call.args.ref === this.authorized.ref }
   queue(candidate: SourcingCandidate, identity: string, page?: any, foregroundSource?: string) {
     if (!this.job.autoGreet) return
-    const legacyKey = hash([candidate.platform, candidate.profileUrl || normalized(identity)])
+    const textIdentity = recruitmentPlatform(candidate.platform).candidateTextIdentity?.(identity)
+    const legacyKey = hash([candidate.platform, candidate.profileUrl || textIdentity?.canonical || normalized(identity)])
     const row = { key: candidate.platformIdentity ? platformIdentityKey(candidate.platform, candidate.platformIdentity) : legacyKey,
-      platformIdentity: candidate.platformIdentity, identityAliases: greetingIdentityAliases(candidate.platform, candidate.profileUrl, identity), candidateKey: candidate.key, platform: candidate.platform,
+      platformIdentity: candidate.platformIdentity, identityAliases: [...new Set([
+        ...greetingIdentityAliases(candidate.platform, candidate.profileUrl, identity), ...(!candidate.platformIdentity && !candidate.profileUrl && textIdentity
+          ? textIdentity.aliases.map(text => hash([candidate.platform, text])) : [])])], candidateKey: candidate.key, platform: candidate.platform,
       name: candidate.name, identityKind: candidate.platformIdentity ? 'platform_id' as const : candidate.profileUrl ? 'url' as const : 'text' as const, stage: 'sending' as const, detail: '等待核对页面后打招呼，尚未派发', updatedAt: new Date().toISOString() }
     ;(this.job.greetings ??= []).push(row); this.awaiting = candidate.key
     this.detailIdentity = page ? bindResumeDetail(page, candidate, foregroundSource) : undefined
@@ -60,7 +63,8 @@ export class SourcingGreeting {
       const quote = assertCandidateQuote(page, identity)
       assertCandidateQuote(page, { name: candidate.name, ref: input.ref, evidenceRefs: [input.identityRef, ...input.evidenceRefs] })
       const profile = candidateProfile(page, identity, PLATFORMS[this.platform].origins).url
-      const legacyKey = hash([this.platform, candidate.profileUrl ? profile : normalized(quote)])
+      const textIdentity = adapter.candidateTextIdentity?.(quote)
+      const legacyKey = hash([this.platform, candidate.profileUrl ? profile : textIdentity?.canonical || normalized(quote)])
       identityMatches = candidate.platformIdentity && currentIdentity
         ? platformIdentityKey(this.platform, currentIdentity) === row.key
         : [row.key, ...(row.identityAliases ?? [])].includes(legacyKey)

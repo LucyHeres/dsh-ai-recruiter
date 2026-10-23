@@ -26,7 +26,9 @@ export class SourcingBrowser {
   }
   locator(ref: string) { const page = this.page(); return { tabId: page.tabId, snapshotId: page.snapshotId, ref } }
   async snapshot(format?: 'dom' | 'semantic', viewportOnly?: boolean) {
-    await this.execute('browser_snapshot', { tabId: this.page().tabId, ...(format ? { format } : {}), ...(viewportOnly === undefined ? {} : { viewportOnly }) })
+    const page = this.page()
+    await this.execute('browser_snapshot', { tabId: page.tabId, ...(page.frameId ? { frameId: page.frameId } : {}),
+      ...(format ? { format } : {}), ...(viewportOnly === undefined ? {} : { viewportOnly }) })
     return this.page()
   }
   async click(ref: string) {

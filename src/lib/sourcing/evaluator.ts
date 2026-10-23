@@ -71,6 +71,7 @@ async function evaluateFreshSources(agent: BrowserAgentRunner, requirements: Sou
       + (Object.keys(candidateFilters).length ? '逐项核验candidateFilters，放入filterAssessments，判断与证据编号规则相同。城市按期望/意向工作地判断，不能把现居城市当作工作意向；经验按实际工作年限和要求范围判断；学历按最低学历及以上判断。推荐来源不代表符合；未提及用unknown，不猜测。' : '')
       + 'fields 是可选基本信息；value 必须逐字摘录，不补单位、不改写。未明确提及的薪资等字段必须省略。',
     goal: { mode, rubricVersion: requirements.rubricVersion, criteria: requirements.criteria, supplementCoverage: requirements.supplementCoverage,
+      ...(requirements.basicFilters ? { authoritativeBasicFilters: requirements.basicFilters } : {}),
       ...(Object.keys(candidateFilters).length ? { candidateFilters } : {}), candidates: inputs },
     signal, logger, modelPurpose: 'assessment', maxTurns: 2, maxDurationMs: 120000, isComplete: () => !!accepted,
     tools: [{ name: 'sourcing_submit_assessments', description: '提交匹配判断和证据编号；宿主从该人原文还原引用、核验并计算分数。',

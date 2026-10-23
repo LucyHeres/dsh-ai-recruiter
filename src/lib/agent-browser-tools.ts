@@ -58,12 +58,12 @@ export class AgentBrowserTools {
           // additionalProperties:false 校验失败而中止（真实事故：预设对 browser_wait
           // 传了 purpose，导致每次新开标签页首屏都 tool_failed 并立刻交棒）。
           if (readOnly) delete boundedInput.purpose
-          // 快照始终带 frameId（顶层为 0），宿主内部调用方常把它原样带给后续工具。
-          // 只有声明了 frameId 的工具才接受它：交互类能力从快照记录里取帧，且扩展对
-          // 非顶层帧的交互是明确拒绝的（FRAME_INTERACTION_UNSUPPORTED），因此对未声明
-          // 它的工具剥离 frameId 不改变行为，只避免 additionalProperties:false 拒绝。
-          // （真实事故：预设把 frameId=0 带给 browser_click，首屏后的第一次点击必失败。）
+          // 交互从快照记录取得所属帧；只给声明该字段的工具传 frameId。
           if (!schema.properties.frameId) delete boundedInput.frameId
+          else if (info.name === 'browser_snapshot' && boundedInput.frameId === undefined) {
+            const frameId = this.pages.get(Number(boundedInput.tabId))?.frameId
+            if (frameId) boundedInput.frameId = frameId
+          }
           const argumentAdjustments = readOnly ? Object.entries(schema.properties).flatMap(([field, definition]: [string, any]) => {
             const requested = input[field]
             if (!/^(?:max[A-Z]|limit$)/.test(field) || typeof requested !== 'number' || !Number.isFinite(requested)
@@ -78,6 +78,7 @@ export class AgentBrowserTools {
           }
           const { purpose = 'navigation', ...args } = boundedInput as Record<string, any>
           const beforePage = this.pages.get(args.tabId)
+          const observationFrameId = args.frameId ?? (['browser_open_tab', 'browser_navigate', 'browser_history'].includes(info.name) ? 0 : beforePage?.frameId)
           // Use the extension's existing bounded post-input observation, not a
           // second write or a separate model turn. Explicit options win.
           const observationWait = typeof options.observationWait === 'function' ? options.observationWait(info.name, args) : options.observationWait ?? 'dom_quiet'
@@ -125,7 +126,8 @@ export class AgentBrowserTools {
               && (raw?.snapshot ?? raw?.output?.snapshot)?.format !== observationFormat) {
               const tabId = raw?.tabId ?? raw?.output?.tabId ?? args.tabId
               try {
-                const snapshot = await this.tools.find(tool => tool.name === 'browser_snapshot')!.execute({ tabId, format: observationFormat }, signal)
+                const snapshot = await this.tools.find(tool => tool.name === 'browser_snapshot')!.execute({ tabId, format: observationFormat,
+                  ...(observationFrameId ? { frameId: observationFrameId } : {}) }, signal)
                 return raw?.output?.snapshot ? { ...value, output: { ...value.output, snapshot } } : { ...value, snapshot }
               } catch (error) {
                 signal.throwIfAborted()
@@ -140,7 +142,7 @@ export class AgentBrowserTools {
               if (Number.isInteger(tabId)) {
                 try {
                   const snapshot = await this.tools.find(tool => tool.name === 'browser_snapshot')!.execute({ tabId,
-                    ...(args.frameId === undefined ? {} : { frameId: args.frameId }) }, signal)
+                    ...(observationFrameId === undefined ? {} : { frameId: observationFrameId }) }, signal)
                   return { ...(value && typeof value === 'object' ? value : { result: value }), snapshot }
                 } catch (error) {
                   signal.throwIfAborted()

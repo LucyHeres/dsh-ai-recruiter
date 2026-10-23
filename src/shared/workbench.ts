@@ -14,14 +14,21 @@ export const TASK_FEATURES: readonly TaskFeature[] = [
 ]
 export const taskFeature = (kind: TaskKind = 'greeting') => TASK_FEATURES.find(feature => feature.kind === kind) ?? TASK_FEATURES[0]
 
-export type Platform = 'liepin' | 'boss'
+/** 平台词表与元数据的唯一事实来源。新增平台只在这里登记一次，
+ *  Platform 联合类型由 key 推导，不再需要同步修改第二处。 */
 export const PLATFORMS = {
-  liepin: { label: '猎聘', channelType: 4, url: 'https://lpt.liepin.com/recommend', origins: ['https://lpt.liepin.com', 'https://www.liepin.com', 'https://passport.liepin.com'] },
-  boss: { label: 'BOSS 直聘', channelType: 11, url: 'https://www.zhipin.com/web/chat/recommend', origins: ['https://www.zhipin.com', 'https://login.zhipin.com'] },
+  liepin: { label: '猎聘', channelType: 4, url: 'https://lpt.liepin.com/recommend', searchUrl: 'https://lpt.liepin.com/search',
+    origins: ['https://lpt.liepin.com', 'https://www.liepin.com', 'https://passport.liepin.com'] },
+  boss: { label: 'BOSS 直聘', channelType: 11, url: 'https://www.zhipin.com/web/chat/recommend', searchUrl: undefined,
+    origins: ['https://www.zhipin.com', 'https://login.zhipin.com'] },
 } as const
+export type Platform = keyof typeof PLATFORMS
+/** 稳定的平台 key 顺序，供运行时 zod 枚举与遍历使用。 */
+export const PLATFORM_KEYS = Object.keys(PLATFORMS) as [Platform, ...Platform[]]
 export const EXTENSION_INSTALL_URL = 'https://s.xinrenxinshi.com/recruitment/xin-get'
 /** 首次唤起 Chrome 扩展实测约 40s，留出余量避免过早报超时。 */
-export const ENSURE_TIMEOUT_SECONDS = 60
+// The extension's local probe may back off for 60s before starting its handshake.
+export const ENSURE_TIMEOUT_SECONDS = 90
 export interface ExtensionInstallation {
   status: 'installed' | 'not_installed' | 'unknown'
   detail: string
@@ -35,6 +42,8 @@ export interface ConnectionState {
   ready: boolean
   available: boolean
   busy: boolean
+  /** Actual local connection attempt, separate from a queued/preparing task. */
+  connecting?: boolean
   requiresBegin: boolean
   executionOwner: string | null
   activeWorkflow: boolean
@@ -107,8 +116,11 @@ export interface GreetingJob extends WorkbenchJob {
   intervalMinSeconds?: number
   intervalMaxSeconds?: number
 }
-export const greetingEntry = (job: Pick<GreetingJob, 'platform' | 'mode'>) => job.platform === 'liepin' && job.mode === 'search'
-  ? 'https://lpt.liepin.com/search' : PLATFORMS[job.platform].url
+/** 搜索模式只对有搜索入口的平台生效，入口 URL 统一来自 PLATFORMS。 */
+export const greetingEntry = (job: Pick<GreetingJob, 'platform' | 'mode'>) => {
+  const platform = PLATFORMS[job.platform]
+  return job.mode === 'search' && platform.searchUrl ? platform.searchUrl : platform.url
+}
 export interface WorkbenchState {
   features: TaskFeature[]
   connection: ConnectionState

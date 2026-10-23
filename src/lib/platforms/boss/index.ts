@@ -1,13 +1,21 @@
-import { StandardPositionRoute, StandardSearchEvidence, type RecruitmentPlatform } from '../types.js'
+import { StandardPositionRoute, type RecruitmentPlatform } from '../types.js'
 import { bossDefinition } from './definition.js'
+import { BossSearchEvidence } from './search-evidence.js'
 import { BossSourcingDriver } from './sourcing-driver.js'
+import { BOSS_SOURCING_ROUTE } from './ai-route.js'
+import { bossReadOnlyControl, readBossResume } from './resume-driver.js'
+import { bossCandidateTextIdentity } from './candidate-identity.js'
 
-/** BOSS owns its fixed route; changed components use the common AI recovery. */
+/** BOSS owns list preflight, actual resume opening and Canvas-body evidence. */
 export const bossPlatform: RecruitmentPlatform = {
+  candidateTextIdentity: bossCandidateTextIdentity,
   sourcingEntry: bossDefinition.sourcingEntry,
-  sourcingHints: '',
+  sourcingEntryAliases: bossDefinition.sourcingEntryAliases,
+  sourcingHints: BOSS_SOURCING_ROUTE,
+  readResume: readBossResume,
+  allowsNavigation: bossReadOnlyControl,
   observationFormat: 'dom',
-  createSearchEvidence: () => new StandardSearchEvidence(),
+  createSearchEvidence: () => new BossSearchEvidence(),
   createPositionRoute: () => new StandardPositionRoute(),
   createSourcingDriver: context => new BossSourcingDriver(context),
 }

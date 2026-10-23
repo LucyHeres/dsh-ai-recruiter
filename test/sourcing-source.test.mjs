@@ -19,6 +19,34 @@ test('omitted source defaults to recommendation on both platforms; search requir
   assert.equal(sourcingStartSpec.safeParse({ ...input, sourceMode: 'auto' }).success, false)
 })
 
+test('startup restores a directly opened iframe document to its outer recommendation page', async () => {
+  const boss = recruitmentPlatform('boss')
+  const alias = 'https://www.zhipin.com/web/frame/recommend/?jobid=job123'
+  assert.deepEqual(boss.sourcingEntryAliases, ['https://www.zhipin.com/web/frame/recommend'])
+  assert.doesNotThrow(() => assertRecommendationPage({ url: alias }, boss.sourcingEntry, boss.sourcingEntryAliases))
+  assert.throws(() => assertRecommendationPage({ url: alias }, boss.sourcingEntry), /SOURCING_RECOMMENDATION_REQUIRED/)
+  for (const url of ['https://www.zhipin.com/web/chat/index', 'https://www.zhipin.com/web/frame/other']) {
+    assert.throws(() => assertRecommendationPage({ url }, boss.sourcingEntry, boss.sourcingEntryAliases), /SOURCING_RECOMMENDATION_REQUIRED/)
+  }
+  let called = 0
+  const seeds = await bootstrapSourcing({
+    bootstrap: async () => [{ name: 'browser_list_tabs', value: { tabs: [{ tabId: 1, url: alias }] } }],
+    currentPage: () => ({ tabId: 1, url: alias }),
+    tools: [{ name: 'browser_navigate', execute: async () => { called++; return {} } }],
+  }, boss.sourcingEntry, true, signal, boss.sourcingEntryAliases)
+  assert.deepEqual(seeds.map(seed => seed.name), ['browser_list_tabs', 'browser_navigate'])
+  assert.equal(called, 1)
+})
+
+test('BOSS iframe navigation is blocked for both direct tools and observed links', () => {
+  const boss = recruitmentPlatform('boss'), url = boss.sourcingEntryAliases[0] + '/?jobid=job123'
+  const page = { url: boss.sourcingEntry, items: [{ ref: 'frame-link', href: url }] }
+  for (const [name, args] of [['browser_navigate', { url }], ['browser_open_tab', { url }], ['browser_click', { ref: 'frame-link' }]]) {
+    assert.throws(() => assertRecommendationNavigation({ name, args, readOnly: false }, page, boss.sourcingEntry, boss.sourcingEntryAliases), /SOURCING_FRAME_NAVIGATION_FORBIDDEN/)
+  }
+  assert.doesNotThrow(() => assertRecommendationNavigation({ name: 'browser_snapshot', args: { frameId: 1 }, readOnly: true }, page, boss.sourcingEntry, boss.sourcingEntryAliases))
+})
+
 test('recommendation proof checks the actual source, not a model-declared source or selected job alone', () => {
   assert.equal(isSourcingEntry(entry + '?jobId=123', entry), true)
   assert.equal(isSourcingEntry(entry + '/', entry), true)

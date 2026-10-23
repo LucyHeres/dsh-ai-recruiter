@@ -1,4 +1,4 @@
-import { safePageUrl, statesOf, itemText } from './page-actions.js'
+import { safePageUrl, statesOf, itemText, normalized } from './page-actions.js'
 import { pageTextEvidenceRef, dialogEvidenceRef } from './page-evidence.js'
 
 export interface ObservationSlice { offset?: number; limit?: number; query?: string; compact?: boolean }
@@ -11,8 +11,10 @@ export function modelPageObservation(page: any, slice: ObservationSlice = {}) {
   const treeBudget = compact ? 18000 : 28000, resultBudget = compact ? 26000 : 48000
   const dialogs = Array.isArray(page?.dialogs) ? page.dialogs : []
   const foreground = new Set(dialogs.map((item: any) => item.ref))
+  const dismissal = (item: any) => !statesOf(item).some(state => ['blocked_by_dialog', 'occluded', 'disabled'].includes(state))
+    && /^(?:关闭|close(?:[-_ ](?:circle|outline))?|×|✕)$/i.test(normalized(item.name))
   const rank = (item: any) => foreground.has(item.ref) || foreground.has(item.dialogRef) ? 0
-    : statesOf(item).includes('focused') ? 1 : statesOf(item).some(state => ['blocked_by_dialog', 'occluded'].includes(state)) ? 4 : 2
+    : statesOf(item).includes('focused') || dismissal(item) ? 1 : statesOf(item).some(state => ['blocked_by_dialog', 'occluded'].includes(state)) ? 4 : 2
   const query = String(slice.query ?? '').normalize('NFKC').toLocaleLowerCase().trim()
   const items = all.filter((item: any) => !statesOf(item).some(state => ['hidden', 'invisible'].includes(state)))
     .filter((item: any) => !query || `${itemText(item)} ${item.description ?? ''}`.normalize('NFKC').toLocaleLowerCase().includes(query))
@@ -44,6 +46,9 @@ export function modelPageObservation(page: any, slice: ObservationSlice = {}) {
   }
   const next = offset + returned, omitted = items.length - returned
   const result = { representation: 'semantic-v1', url: safePageUrl(page?.url), snapshotId: page?.snapshotId, format: page?.format ?? 'dom', viewport: page?.viewport,
+    ...(Number.isInteger(page?.frameId) ? { frameId: page.frameId } : {}),
+    ...(page?.tabUrl ? { tabUrl: safePageUrl(page.tabUrl) } : {}),
+    ...(['same-origin', 'unsupported'].includes(page?.frameInteraction) ? { frameInteraction: page.frameInteraction } : {}),
     tree: lines.join('\n'), ...(Object.keys(contexts).length ? { contexts } : {}),
     ...(page?.format !== 'semantic' && page?.text && offset === 0 ? { text: String(page.text).slice(0, compact ? 2000 : 4000), textEvidenceRef: pageTextEvidenceRef } : {}),
     truncated: !!page?.truncated || omitted > 0, omittedElementCount: (page?.omittedElementCount ?? 0) + omitted,

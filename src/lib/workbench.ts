@@ -20,16 +20,17 @@ import type { ResumeImport } from './resume-import.js'
 import type { WorkbenchTaskExecutor } from './task-executor.js'
 import { candidateCommunication, communicationIndex, sourcingResults, taskHistoryPage } from './sourcing-review.js'
 import { SourcingAgent } from './sourcing-agent.js'
+import { readSourcingSettings, saveSourcingSettings, sourcingSettingsPatchSpec } from './sourcing-settings.js'
 import { AgentBrowserTools } from './agent-browser-tools.js'
 import { candidateContactKeys, candidateResumeReceipt, readCandidateContacts } from './candidate-contact.js'
 import { assertCommunicationRead, syncPlatformCommunication } from './communication-sync.js'
-import { syncLiepinResumes, LIEPIN_RESUME_ORIGINS } from './liepin-resume-sync.js'
+import { recruitmentPlatform } from './platforms/registry.js'
 import { candidateAttachments, receivedResumes, selectReceivedResumes, cachedReceivedFile } from './received-resume-store.js'
 import type { BrowserAgentRunner } from './host-browser-agent.js'
 import type { CommunicationSyncResult, SourcingCandidate, SourcingJob, SourcingPosition } from '../shared/sourcing.js'
-import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, TASK_FEATURES, type Platform, type TaskKind, type ConnectionState, type GreetingJob, type JobOption, type WorkbenchJob, type WorkbenchState } from '../shared/workbench.js'
+import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, PLATFORM_KEYS, TASK_FEATURES, type Platform, type TaskKind, type ConnectionState, type GreetingJob, type JobOption, type WorkbenchJob, type WorkbenchState } from '../shared/workbench.js'
 
-const platformSpec = z.enum(['liepin', 'boss'])
+const platformSpec = z.enum(PLATFORM_KEYS)
 const idSpec = z.string().uuid()
 const date = () => new Date().toISOString()
 declare module '@deepseek-ai/cordis' { interface Context { aiRecruitWorkbench: Workbench } }
@@ -41,6 +42,7 @@ export class Workbench extends TypertRemoteService {
   private disposed = false
   private initialized?: Promise<void>
   private statusRead?: Promise<ConnectionState>
+  private connecting = false
   private readonly extensionDetector = new ExtensionInstallationDetector()
   private readonly greetingConfig: GreetingPolicy
   private readonly classifyLogin: ReturnType<typeof hostLoginClassifier>
@@ -120,7 +122,7 @@ export class Workbench extends TypertRemoteService {
   private async connection(): Promise<ConnectionState> {
     if (this.statusRead) return this.statusRead
     const task = (async () => {
-      const base: ConnectionState = { gateway: false, connected: false, authenticated: false, ready: false, available: false, busy: !!this.active || this.operation, requiresBegin: false, executionOwner: null, activeWorkflow: false, detail: '网关未运行，请点击启动连接' }
+      const base: ConnectionState = { gateway: false, connected: false, authenticated: false, ready: false, available: false, busy: !!this.active || this.operation, connecting: this.connecting === true, requiresBegin: false, executionOwner: null, activeWorkflow: false, detail: '网关未运行，请点击启动连接' }
       try {
         const raw = await this.call('browser_status')
         return { ...base, gateway: true, connected: raw.connected === true, authenticated: raw.authenticated === true,
@@ -140,7 +142,13 @@ export class Workbench extends TypertRemoteService {
   async sourcingPosition(request: unknown, signal?: AbortSignal) {
     const { jobId } = z.object({ jobId: z.string().min(1).max(64) }).strict().parse(request)
     if (!this.sourcing) throw new Error('人才寻聘尚未接入')
-    return this.sourcing.loadPosition(jobId, signal)
+    const [position, settings] = await Promise.all([this.sourcing.loadPosition(jobId, signal), readSourcingSettings(this.store, jobId)])
+    return { ...position, settings }
+  }
+  @Remote
+  async saveSourcingSettings(request: unknown) {
+    const { jobId, settings } = z.object({ jobId: z.string().min(1).max(64), settings: sourcingSettingsPatchSpec }).strict().parse(request)
+    return saveSourcingSettings(this.store, jobId, settings)
   }
   @Remote
   async positionOverview() {
@@ -219,13 +227,15 @@ export class Workbench extends TypertRemoteService {
       await this.begin(signal); owned = true
       const tools = await this.browser.listTools(signal)
       for (const platform of [...new Set([...candidates.values()].map(candidate => candidate.platform))]) {
+        // 平台差异只来自注册表：缺省走通用 DOM 读取，声明了专有同步则直接用。
+        const sync = recruitmentPlatform(platform).communicationSync
         const broker = new AgentBrowserTools(tools, (name, args, toolSignal) => this.call(name, args, toolSignal), {
-          origins: platform === 'liepin' ? LIEPIN_RESUME_ORIGINS : PLATFORMS[platform].origins, signal, confirmationId: `communication-read-${jobId}-${Date.now()}`,
-          hostTools: platform === 'liepin' ? ['browser_network_response', 'artifact_read'] : undefined,
+          origins: sync?.origins ?? PLATFORMS[platform].origins, signal, confirmationId: `communication-read-${jobId}-${Date.now()}`,
+          hostTools: sync?.hostTools,
           observationFormat: 'dom', observationViewportOnly: true, observationWait: 'none', logger: this.logger })
         broker.setBeforeCall(async call => { assertCommunicationRead(call, broker.currentPage()) })
         try {
-          const synced = platform === 'liepin' ? await syncLiepinResumes(broker, [...candidates.values()], this.store, signal)
+          const synced = sync?.sync ? await sync.sync(broker, [...candidates.values()], this.store, signal)
             : await syncPlatformCommunication(broker, platform, [...candidates.values()], this.store, signal)
           result.matched += synced.matched; result.updated += synced.updated
           result.platforms.push({ platform, matched: synced.matched, detail: synced.detail })
@@ -293,8 +303,18 @@ export class Workbench extends TypertRemoteService {
   @Remote
   async connect(signal?: AbortSignal) {
     const release = this.reserve()
-    try { await this.call('browser_ensure', { timeoutSeconds: ENSURE_TIMEOUT_SECONDS }, signal); return await this.connection() }
+    try { await this.ensureConnection(signal); return await this.connection() }
     finally { release() }
+  }
+  private async ensureConnection(signal?: AbortSignal, timeoutMs = (ENSURE_TIMEOUT_SECONDS + 5) * 1000) {
+    const deadline = AbortSignal.timeout(timeoutMs)
+    const connectionSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
+    this.connecting = true
+    try { await this.call('browser_ensure', { timeoutSeconds: ENSURE_TIMEOUT_SECONDS }, connectionSignal) }
+    catch (error) {
+      if (!signal?.aborted && (deadline.aborted || /等待扩展连接超时/.test(String(error)))) throw new Error(`BROWSER_CONNECTION_TIMEOUT: 浏览器扩展在 ${ENSURE_TIMEOUT_SECONDS} 秒内未连接成功，请确认浏览器已打开且薪招扩展已启用，再点击“连接浏览器”重试`)
+      throw error
+    } finally { this.connecting = false }
   }
   @Remote
   async pair(signal?: AbortSignal) {
@@ -308,7 +328,7 @@ export class Workbench extends TypertRemoteService {
     } finally { release() }
   }
   private async begin(signal?: AbortSignal) {
-    await this.call('browser_ensure', { timeoutSeconds: ENSURE_TIMEOUT_SECONDS }, signal)
+    await this.ensureConnection(signal)
     const state = await this.connection()
     if (!state.ready || (!state.available && !state.requiresBegin) || state.activeWorkflow || state.executionOwner === 'remote') throw new Error('BROWSER_AGENT_BUSY: 浏览器未就绪或已有任务持有执行权')
     await this.call('browser_begin', {}, signal)

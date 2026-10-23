@@ -12,17 +12,20 @@ export function positionBusinessIds(page: any, item?: any): string[] {
   } catch { return [] }
 }
 
+/** 平台推荐页给职位名加的业务后缀；由 PlatformDefinition 声明，通用代码不认平台。 */
+export interface PositionTitleAlias { suffix: string; path: string }
+
 /** Match the control's title/value, never a job name buried in candidate text. */
-export function positionNameMatches(page: any, item: any, name: string): boolean {
+export function positionNameMatches(page: any, item: any, name: string, alias?: PositionTitleAlias): boolean {
   const target = normalized(name)
   if (!target) return false
   const title = normalized(item.value || item.name)
   if (title === target) return true
-  // Captured Liepin recommendation badge; arbitrary job-name suffixes differ.
+  // 平台声明的标题后缀只在对应路径上生效；任意职位名后缀仍不匹配。
+  if (!alias) return false
   try {
-    const url = new URL(page.url)
-    return url.origin === 'https://lpt.liepin.com' && url.pathname.replace(/\/$/, '') === '/recommend'
-      && item.role === 'tab' && title === `${target} 高交付`
+    return new URL(page.url).pathname.replace(/\/$/, '') === alias.path
+      && item.role === 'tab' && title === `${target} ${alias.suffix}`
   } catch { return false }
 }
 
@@ -60,10 +63,10 @@ export function distinctPositionControls(page: any, items: any[]): any[] {
 
 /** Disambiguate only with business evidence attached to the option itself.
  * The current page URL says nothing about an unselected option. */
-export function positionChoices(page: any, items: any[], targets: { id: string; name?: string }[], preferredId?: string): any[] {
+export function positionChoices(page: any, items: any[], targets: { id: string; name?: string }[], preferredId?: string, alias?: PositionTitleAlias): any[] {
   const candidates = items.filter(item => positionControl(page, item) && !statesOf(item).includes('disabled'))
   const eligible = candidates.filter(item => {
-    const matching = targets.filter(target => positionNameMatches(page, item, target.name || ''))
+    const matching = targets.filter(target => positionNameMatches(page, item, target.name || '', alias))
     const ids = positionBusinessIds(page, item)
     if (!matching.length || preferredId && !matching.some(target => target.id === preferredId)) return false
     if (ids.length && matching.some(target => target.id)) return ids.length === 1 && ids.every(id => matching.some(target => target.id === id))

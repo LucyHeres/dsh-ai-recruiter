@@ -9,11 +9,35 @@ function fixture(config = {}, efforts = ['low', 'high']) {
     async resolveModelInfo(provider, model, signal) { lookups.push({ provider, model, signal }); return { provider, id: model, reasoning: { efforts: efforts.map(id => ({ id, name: id })) } } },
     async *stream(request) { requests.push(request); yield { type: 'finish', reason: { kind: 'stop' } } },
   }
-  const ctx = { get: name => name === 'llm' ? llm : name === 'agentDefaultModel' ? { currentSelection: () => selected } : undefined }
+  const services = { llm, agentDefaultModel: { currentSelection: () => selected } }
+  const ctx = { get: name => services[name] }
   const create = () => hostBrowserAgent(ctx, undefined, config)()
   const run = (options = {}) => create()({ system: 'test', goal: {}, tools: [], signal: new AbortController().signal, maxTurns: 1, ...options })
-  return { selected, requests, lookups, llm, create, run }
+  return { selected, requests, lookups, llm, services, create, run }
 }
+
+test('resume images use declared vision capability and durable image content, never JSON base64 placeholders', async () => {
+  const f = fixture(), saved = []
+  const resolve = f.llm.resolveModelInfo
+  f.llm.resolveModelInfo = async (...args) => ({ ...await resolve(...args), inputModalities: ['text', 'image'] })
+  f.services.attachments = { saveImages: async images => {
+    saved.push(...images)
+    return images.map(() => ({ attachmentId: 'a'.repeat(64), mediaType: 'image/png', bytes: 16, width: 774, height: 800 }))
+  } }
+  await f.run({ inputImages: [{ data: new Uint8Array([1, 2, 3]), mediaType: 'image/png' }] })
+  assert.equal(saved.length, 1)
+  const content = f.requests[0].messages[0].content
+  assert.equal(content[1].type, 'image')
+  assert.equal(content[1].attachment.mediaType, 'image/png')
+  assert.ok(!JSON.stringify(f.requests[0]).includes('base64'))
+})
+
+test('an undeclared vision model stops before image persistence or inference', async () => {
+  const f = fixture()
+  f.services.attachments = { saveImages: async () => assert.fail('cannot persist images for text-only inference') }
+  await assert.rejects(f.run({ inputImages: [{ data: new Uint8Array([1]), mediaType: 'image/png' }] }), /RESUME_VISION_MODEL_REQUIRED/)
+  assert.equal(f.requests.length, 0)
+})
 
 test('browser auto-low uses only advertised low and does not mutate global route', async () => {
   const f = fixture(); await f.run()

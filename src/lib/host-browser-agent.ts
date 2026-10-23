@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { GenerateOptions, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, ImageBlock, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { runBrowserAgent, type BrowserAgentOptions, type BrowserAgentResult } from './browser-agent.js'
 import type { DeveloperLog } from './developer-log.js'
 import { assertHostModelProvider } from './host-model-provider.js'
@@ -27,6 +27,18 @@ export function hostBrowserAgent(ctx: Context, logger?: DeveloperLog, config: Br
     let cachedInfo: { value: LlmResolvedModelInfo; expiresAt: number } | undefined
     return async options => {
       const route = { ...baseRoute }
+      let imageAttachments = options.imageAttachments
+      if (options.inputImages?.length) {
+        options.signal.throwIfAborted()
+        if (options.inputImages.length > 8 || options.inputImages.some(image => image.data.byteLength > 20 * 1024 * 1024)) throw new Error('RESUME_IMAGE_BUDGET_EXCEEDED')
+        const info = await llm.resolveModelInfo?.(route.provider, route.model, options.signal)
+        if (!info?.inputModalities?.includes('image')) throw new Error('RESUME_VISION_MODEL_REQUIRED: 当前模型未声明图片读取能力，请在薪灵模型设置中选择支持图片的模型后重试')
+        const attachments = ctx.get('attachments') as { saveImages(images: NonNullable<BrowserAgentOptions['inputImages']>): Promise<readonly ImageBlock['attachment'][]> } | undefined
+        if (!attachments) throw new Error('RESUME_IMAGE_STORAGE_UNAVAILABLE: 宿主未提供图片读取服务')
+        const refs = await attachments.saveImages(options.inputImages)
+        options.signal.throwIfAborted()
+        imageAttachments = refs.map(attachment => ({ type: 'image' as const, attachment }))
+      }
       const effort = config.browserAgentReasoningEffort?.trim() || 'auto-low'
       if (effort !== 'inherit') {
         let info = cachedInfo && cachedInfo.expiresAt > Date.now() ? cachedInfo.value : undefined
@@ -48,7 +60,7 @@ export function hostBrowserAgent(ctx: Context, logger?: DeveloperLog, config: Br
       }
       try { (options.logger ?? logger)?.write('info', 'browser_agent.model_profile', { provider: route.provider, model: route.model,
         reasoningEffort: route.reasoningEffort, profile: effort, dedicatedRoute: !!provider }) } catch { /* observer only */ }
-      return runBrowserAgent(llm, route, { ...options, logger: options.logger ?? logger })
+      return runBrowserAgent(llm, route, { ...options, inputImages: undefined, imageAttachments, logger: options.logger ?? logger })
     }
   }
 }

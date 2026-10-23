@@ -312,6 +312,7 @@ const TOOLS = [
     description: `抓取页面或元素内容生成 artifact。${SELECTOR_XOR_REF}`,
     properties: {
       tabId: { type: 'integer' },
+      frameId: { type: 'integer' },
       selector: { type: 'string', description: 'CSS 选择器' },
       ...REF_PROPS,
       format: { type: 'string', description: '默认 html' },

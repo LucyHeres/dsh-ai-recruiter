@@ -202,7 +202,9 @@ async function resumeFixture(platform, options = {}) {
     items: candidate === undefined ? people.map((name, index) => ({ ref: `candidate-${index}`, role: options.sparseSemantic && format === 'semantic' ? 'text' : 'button', name: body(index) }))
       : [{ ref: 'identity', role: 'article', name: body(candidate) },
         { ref: preview ? 'attachment' : 'preview', role: 'button', name: preview ? options.unknownDownload && candidate === 0 ? '取回文件' : '下载简历' : '预览附件', context: { text: body(candidate) } }] }
-    if (platform === 'liepin' && candidate === undefined) observed.items.push({ ref: 'received', role: 'tab', name: '收到简历', states: ['selected'] })
+    if (candidate === undefined) observed.items.push(platform === 'liepin'
+      ? { ref: 'received', role: 'tab', name: '收到简历', states: ['selected'] }
+      : { ref: 'received', role: 'tab', name: '已获取简历', states: ['selected'] })
     return observed
   }
   const broker = new AgentBrowserTools(infos, async (name, args) => {

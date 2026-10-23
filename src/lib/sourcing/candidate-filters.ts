@@ -3,6 +3,12 @@ import type { SourcingSearchFilters } from '../../shared/sourcing.js'
 import type { filterAssessmentsSpec } from './contracts.js'
 import { normalized } from '../page-actions.js'
 
+export function candidateFilterFailure(expected: SourcingSearchFilters, rows: z.infer<typeof filterAssessmentsSpec>) {
+  const labels = { city: '期望工作城市', experience: '工作经验', education: '学历' }
+  return rows.filter(row => row.state !== 'match').map(row =>
+    `${labels[row.field]}${row.state === 'mismatch' ? '不符合' : '尚无法确认'}（要求：${expected[row.field]}；${row.reason}）`).join('；')
+}
+
 /** Page filters reduce work. Candidate acceptance still needs per-person
  * evidence, even when a recommendation page has no equivalent filter UI. */
 export function assessCandidateFilters(expected: SourcingSearchFilters, rows: z.infer<typeof filterAssessmentsSpec>, text: string) {

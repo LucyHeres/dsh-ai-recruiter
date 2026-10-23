@@ -5,6 +5,11 @@ export const listFieldLabels: Record<SourcingListField, string> = {
   age: '年龄', education: '学历', experience: '工作经验年限', city: '期望工作城市', company: '工作经历就职公司', salary: '薪资',
 }
 
+export function listAssessmentFailure(criteria: SourcingListCriterion[], rows: SourcingListAssessment[]) {
+  return rows.filter(row => row.state !== 'match').map(row =>
+    `${listFieldLabels[row.field]}${row.state === 'mismatch' ? '不符合' : '尚无法确认'}（要求：${criteria.find(criterion => criterion.field === row.field)?.requirement}；${row.reason}）`).join('；')
+}
+
 export const LIST_REQUIREMENTS_PROMPT = '另行提炼listCriteria作为列表初筛条件，仅允许年龄(age)、学历(education)、工作经验年限(experience)、期望工作城市(city)、工作经历就职公司(company)、薪资(salary)六类。只提取JD或补充要求明确提出的硬性条件，不自行添加条件；优先/加分/最好等偏好不得放入列表硬过滤，应进入详情bonus；上一段任职时长不等于总工龄，不是列表experience条件。不限/无要求不提取，没有条件填空数组。同一维度合并为一项，requirement保留具体范围、上下限、是否包含边界、最低学历或精确学历等限制，quote逐字引用原文；不能遗漏明确硬条件。公司指要求的候选人任职公司背景，不能把招聘公司或服务客户当成任职要求；薪资区分期望薪资与当前薪资并保留单位和周期。补充要求明确修改同类条件时以补充要求为准。列表条件独立于详情技能评分，年龄只核验明确年龄要求，不进入详情能力评分。'
 
 export function validateListCriteria(criteria: SourcingListCriterion[], source: string) {

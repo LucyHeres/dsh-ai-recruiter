@@ -166,14 +166,15 @@ class PlatformPreset {
     const job = this.dependencies.job as GreetingJob
     const items: any[] = Array.isArray(page?.items) ? page.items : []
     const targets = job.platformJobs?.length ? job.platformJobs : [{ name: job.jobName, id: '' }]
+    const alias = platformDefinition(job.platform).positionAlias
     const named = items.filter((item: any) => actionable(item) && positionControl(page, item) && !statesOf(item).some(state => ['selected', 'checked', 'current'].includes(state)) && ['tab', 'option', 'menuitem'].includes(item.role)
-      && targets.some(target => positionNameMatches(page, item, target.name || '')))
-    const choices = positionChoices(page, named, targets, job.selectedPlatformJob?.id)
+      && targets.some(target => positionNameMatches(page, item, target.name || '', alias)))
+    const choices = positionChoices(page, named, targets, job.selectedPlatformJob?.id, alias)
     const option = single(choices)
     if (option) return this.input(page, option, 'browser_click')
     // A unique name is enough; multiple same-name jobs need observed business
     // evidence. A widget's dynamic DOM ID cannot resolve the user's intent.
-    if (named.length > 1 || named.length && targets.filter(target => named.some(item => positionNameMatches(page, item, target.name || ''))).length > 1) {
+    if (named.length > 1 || named.length && targets.filter(target => named.some(item => positionNameMatches(page, item, target.name || '', alias))).length > 1) {
       this.reason = 'duplicate_target_jobs'; return
     }
     const trigger = single(items.filter((item: any) => actionable(item) && (item.role === 'combobox'

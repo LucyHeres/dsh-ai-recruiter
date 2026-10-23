@@ -5,7 +5,7 @@ import type { DeveloperLog } from './developer-log.js'
 import { Store } from './store.js'
 import { safeError } from './task-error.js'
 import { sourcingSource, sourcingStartSpec, sourcingVersion, validateCriteria, validateSupplementCoverage } from './sourcing-policy.js'
-import { PLATFORMS, type Platform, type WorkbenchJob } from '../shared/workbench.js'
+import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, type Platform, type WorkbenchJob } from '../shared/workbench.js'
 import type { SourcingJob, SourcingPosition, SourcingRequirements } from '../shared/sourcing.js'
 import { sourcingTotalTarget, sourcingQualifiedCount } from '../shared/sourcing-score.js'
 import { deriveSourcingSearchFilters } from './sourcing-search.js'
@@ -15,6 +15,7 @@ import { createSourcingSession } from './sourcing/session.js'
 import { sourcingEntry, sourcingMode } from './sourcing/source.js'
 import { recruitmentPlatform } from './platforms/registry.js'
 import { validateListCriteria } from './sourcing/list-screening.js'
+import { withFixedListCriteria } from './sourcing/requirement-policy.js'
 
 const now = () => new Date().toISOString()
 
@@ -46,7 +47,8 @@ export class SourcingAgent {
     const prior = await this.store.find<SourcingRequirements>(`criteria-${job.requirementVersion}`)
     if (prior?.listCriteria && prior.rubricVersion === 2) {
       const source = sourcingSource(job.position, job.supplement)
-      validateCriteria(prior.criteria, source); validateListCriteria(prior.listCriteria, source); validateSupplementCoverage(prior, job.supplement); job.requirements = prior
+      const resolved = { ...prior, basicFilters: job.searchFilters, listCriteria: withFixedListCriteria(job.position, job.supplement, prior.listCriteria) }
+      validateCriteria(resolved.criteria, source); validateListCriteria(resolved.listCriteria, source); validateSupplementCoverage(resolved, job.supplement); job.requirements = resolved
     }
   }
   private async save(job: SourcingJob) {
@@ -69,8 +71,10 @@ export class SourcingAgent {
         const agent = this.agentOf()
         const history = (await this.store.list<SourcingJob>(this.storagePrefix)).filter(row => row.kind === this.kind && row.jobId === job.jobId && row.requirementVersion === job.requirementVersion && row.id !== job.id)
         // Old list-only results still need their first real detail capture.
-        // Greeting history is reconciled separately before any dispatch.
-        const previous = new Set(history.flatMap(row => row.candidates ?? []).filter(row => row.scope !== 'summary').map(row => row.key))
+        // BOSS has no online detail page: its list card is the final source,
+        // so those summary results stay in the cross-round duplicate set.
+        const previous = new Set(history.flatMap(row => row.candidates ?? []).filter(row => row.scope !== 'summary' || row.platform === 'boss').flatMap(row => [row.key, ...(row.identityAliases ?? [])]))
+        await this.progress(job, 'connecting', `正在确认浏览器连接，未连接时将自动连接（最长 ${ENSURE_TIMEOUT_SECONDS} 秒）`)
         await this.begin(signal); owned = true; job.status = 'running'
         for (const channel of job.channels) {
           signal.throwIfAborted()
@@ -91,7 +95,7 @@ export class SourcingAgent {
             if (channel.status === 'running') {
               const reached = session.complete()
               channel.status = reached ? 'completed' : 'stopped'
-              channel.detail = reached ? `本渠道已评估 ${sourcingQualifiedCount(job) - before} 人` : `${safeError(result.message)}；${session.failureDetail()}`
+              channel.detail = reached ? `本渠道已保存 ${sourcingQualifiedCount(job) - before} 位达标人选` : `${safeError(result.message)}；${session.failureDetail()}`
             }
           } catch (error) {
             if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN/.test(String(error))) {
@@ -111,7 +115,7 @@ export class SourcingAgent {
         job.status = job.channels.every(row => row.status === 'completed') ? 'completed' : job.channels.some(row => row.status === 'failed') && !job.candidates.length ? 'failed' : 'stopped'
         const blocked = job.channels.filter(row => ['stopped', 'failed'].includes(row.status))
         const shortages = job.channels.filter(row => row.status === 'completed' && (row.candidateCount ?? 0) < (row.limit ?? job.limit))
-        job.detail = `本轮已评估 ${job.candidates.length} 人${[...blocked, ...shortages].length ? `；${[...blocked, ...shortages].map(row => `${PLATFORMS[row.platform].label}：${sourcingChannelReason(row.detail)}`).join('；')}` : ''}`
+        job.detail = `本轮已初筛 ${job.scanned ?? 0} 人，已保存 ${job.candidates.length} 人（达标 ${sourcingQualifiedCount(job)} 人）${[...blocked, ...shortages].length ? `；${[...blocked, ...shortages].map(row => `${PLATFORMS[row.platform].label}：${sourcingChannelReason(row.detail)}`).join('；')}` : ''}`
       } catch (error) { job.status = /OUTCOME_UNKNOWN|RESULT_UNKNOWN/.test(String(error)) ? 'unknown' : signal.aborted ? 'stopped' : 'failed'; job.detail = interruption || safeError(error) }
       finally {
         for (const row of job.greetings ?? []) if (row.stage === 'sending') { row.stage = row.attemptedAt ? 'unknown' : 'skipped'; row.detail = row.attemptedAt ? '招呼结果未知，禁止重发' : '任务结束前未执行招呼'; row.updatedAt = now() }

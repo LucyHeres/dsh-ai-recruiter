@@ -21,6 +21,11 @@
   --air-disabled: light-dark(#dce2ed, #343c4d);
   --air-disabled-ink: light-dark(#556176, #aebbd0);
   --air-shadow: light-dark(rgb(39 62 48 / 4%), rgb(8 15 10 / 14%));
+  --air-toast: light-dark(#1f2430, #0f1116);
+  --air-toast-ink: light-dark(#f7f9fc, #f0f3fa);
+  --air-toast-border: light-dark(#2b3343, #3a4354);
+  --air-toast-success: light-dark(#7ee2a8, #4ade80);
+  --air-toast-warning: light-dark(#f3c87e, #e3ba80);
   box-sizing: border-box;
   container: recruiter / inline-size;
   color-scheme: inherit;
@@ -523,6 +528,9 @@
 .air-sourcing > :not(.air-sourcing-results) { flex-shrink: 0; }
 .air-sourcing h3 { margin: 0; color: var(--air-ink); font-size: 14px; font-weight: 600; }
 .air-sourcing h4 { margin: 0; color: var(--air-ink); font-size: 13px; font-weight: 600; }
+.air-sourcing-analysis > h4, .air-sourcing-section-title > h4 { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+/* 中文字形的视觉重心略低于几何中心，竖条下沉 1px 做光学居中。 */
+.air-sourcing-analysis > h4::before, .air-sourcing-section-title > h4::before { content: ''; flex: none; align-self: center; width: 2px; height: 12px; border-radius: 999px; background: var(--air-accent); transform: translateY(1px); }
 .air-sourcing-caption { color: var(--air-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .air-sourcing-loading-dots { display: inline-flex; width: 1.35em; margin-inline-start: .15em; justify-content: space-between; white-space: nowrap; animation: air-sourcing-loading-dots 1.4s steps(1, end) infinite; }
 @keyframes air-sourcing-loading-dots {
@@ -723,6 +731,7 @@ details.air-sourcing-analysis[open] > summary { margin-bottom: 10px; }
 .air-sourcing-run { margin-top: 14px; }
 .air-sourcing-run-time { color: var(--air-muted); font-size: 11px; }
 .air-talent-toolbar { padding: 18px 0 12px; }
+.air-text-button .air-resume-sync-icon { width: 12px; height: 12px; }
 .air-talent-heading { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 24px; margin-bottom: 14px; }
 .air-talent-heading-copy { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
 .air-talent-title { flex-shrink: 0; font-size: 14px; font-weight: 600; margin: 0 !important; }
@@ -761,10 +770,10 @@ details.air-sourcing-analysis[open] > summary { margin-bottom: 10px; }
 .air-talent-feedback > summary:hover, .air-talent-feedback[open] > summary { color: var(--air-ink); }
 .air-talent-feedback-panel { line-height: 1.8; }
 .air-talent-feedback-panel p { margin-top: 8px; color: var(--air-secondary); font-size: 12px; overflow-wrap: anywhere; }
-.air-feedback-toast { position: fixed; left: 50%; bottom: 24px; z-index: 100; display: flex; align-items: flex-start; gap: 8px; width: max-content; max-width: min(560px, calc(100vw - 32px)); padding: 12px 16px; border: 1px solid var(--air-divider); border-radius: 8px; background: var(--air-surface); color: var(--air-ink); box-shadow: 0 6px 24px light-dark(rgb(23 32 51 / 12%), rgb(0 0 0 / 28%)); transform: translateX(-50%); pointer-events: none; }
-.air-feedback-toast > svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--air-success); }
-.air-feedback-toast.is-error > svg { color: var(--air-warning); }
-.air-feedback-toast > p { min-width: 0; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.air-feedback-toast { position: fixed; left: 50%; bottom: 24px; z-index: 100; display: flex; align-items: flex-start; gap: 8px; width: max-content; max-width: min(560px, calc(100vw - 32px)); padding: 12px 16px; border: 1px solid var(--air-toast-border); border-radius: 8px; background: var(--air-toast); color: var(--air-toast-ink); box-shadow: 0 8px 28px light-dark(rgb(15 23 42 / 24%), rgb(0 0 0 / 40%)); transform: translateX(-50%); pointer-events: none; }
+.air-feedback-toast > svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--air-toast-success); }
+.air-feedback-toast.is-error > svg { color: var(--air-toast-warning); }
+.air-feedback-toast > p { min-width: 0; font-size: 12.5px; line-height: 1.7; overflow-wrap: anywhere; }
 .air-talent-filters > summary:focus-visible, .air-talent-feedback > summary:focus-visible { outline: 2px solid var(--air-accent); outline-offset: 3px; }
 .air-sourcing-person-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
 .air-platform-tag { --air-platform-bg: var(--air-soft); --air-platform-fg: var(--air-secondary); --air-platform-border: var(--air-border); display: inline-flex; align-items: center; white-space: nowrap; padding: 1px 6px; border: 1px solid var(--air-platform-border); border-radius: 4px; font-size: 10px; line-height: 18px; font-weight: 400; background: var(--air-platform-bg); color: var(--air-platform-fg); }

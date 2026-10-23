@@ -197,6 +197,7 @@ export class BrowserClient {
     return this.options.logger.trace('browser.call', {
       tool: name, tabId: args.tabId, snapshotId: refId(args.snapshotId), ref: refId(args.ref),
       documentKey: args.documentId ? logKey(args.documentId) : undefined,
+      requestUrl: logPageUrl(args.url), frameId: Number.isInteger(args.frameId) ? args.frameId : undefined,
       viewportOnly: args.viewportOnly === true,
     }, invoke, raw => {
       try {
@@ -204,7 +205,8 @@ export class BrowserClient {
         return {
           outcome: outcome.status, ...(outcome.error ? logError(new Error(outcome.error)) : {}),
           snapshotId: refId(page?.snapshotId), documentKey: page?.documentId ? logKey(page.documentId) : undefined,
-          pageUrl: logPageUrl(page?.url), elementCount: Array.isArray(page?.items) ? page.items.length : undefined,
+          pageUrl: logPageUrl(page?.url), tabUrl: logPageUrl(page?.tabUrl), frameId: page?.frameId,
+          frameInteraction: page?.frameInteraction, elementCount: Array.isArray(page?.items) ? page.items.length : undefined,
           textLength: typeof page?.text === 'string' ? page.text.length : undefined,
           dialogCount: Array.isArray(page?.dialogs) ? page.dialogs.length : undefined,
           truncated: typeof page?.truncated === 'boolean' ? page.truncated : undefined,

@@ -2,11 +2,25 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { findPositionEvidence, verifyPositionEvidence } from '../dist/lib/position-evidence.js'
 import { positionBusinessIds, positionChoices } from '../dist/lib/position-controls.js'
+import { bossDocumentTitle, verifyBossDocumentPosition } from '../dist/lib/platforms/boss/search-evidence.js'
 
-const job = { jobId: 'host-job', jobName: 'Java工程师', platformJobs: [{ id: '123', name: 'Java工程师' }] }
+const job = { platform: 'liepin', jobId: 'host-job', jobName: 'Java工程师', platformJobs: [{ id: '123', name: 'Java工程师' }] }
 const current = (elementId, extra = {}) => ({ ref: 'position', role: 'tab', name: 'Java工程师', states: ['selected'], elementId, ...extra })
 const page = (items = [current()], url = 'https://lpt.liepin.com/recommend') => ({ snapshotId: 's1', url, items })
 const verify = (p, target = job, proof = { ref: 'position' }) => verifyPositionEvidence(p, target, proof)
+
+test('a readable occluded BOSS title still requires the matching job ID and a unique title', () => {
+  const title = { ref: 'title', role: 'div', name: 'Java工程师 _ 上海 13-20K', states: ['occluded'] }
+  const p = page([title], 'https://www.zhipin.com/web/frame/recommend/?jobid=123')
+  assert.equal(bossDocumentTitle(p, [job.jobName]).ref, 'title')
+  assert.equal(verifyBossDocumentPosition(p, job, { ref: 'title' }).verification.level, 'exact')
+  p.url = p.url.replace('jobid=123', 'jobid=other')
+  assert.equal(verifyBossDocumentPosition(p, job, { ref: 'title' }).ok, false)
+  p.url = p.url.replace('jobid=other', 'jobid=123')
+  p.items.push({ ...title, ref: 'other-title' })
+  assert.equal(bossDocumentTitle(p, [job.jobName]), undefined)
+  assert.equal(verifyBossDocumentPosition(p, job, { ref: 'title' }).ok, false)
+})
 
 test('missing, changed and misleading DOM IDs all preserve unique name plus selection without inventing a business ID', () => {
   for (const id of [undefined, '', 'rc-tabs-999-tab-456', 'arbitrary-random-widget', 'job-123']) {

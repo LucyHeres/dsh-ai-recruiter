@@ -13,7 +13,8 @@ import { resumeDiagnosis } from './resume-diagnosis.js'
 import { logError, logKey, type DeveloperLog } from './developer-log.js'
 import { selectReceivedResumes } from './received-resume-store.js'
 import { uploadReceivedFiles } from './received-resume-upload.js'
-import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, RESUME_DEFAULTS, RESUME_LIBRARIES, RESUME_LIBRARY_STATUSES, DELIVERY_TYPE_OPTIONS, type WorkbenchJob, type ResumeOptions } from '../shared/workbench.js'
+import { platformDefinition } from './platforms/catalog.js'
+import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, PLATFORM_KEYS, RESUME_DEFAULTS, RESUME_LIBRARIES, RESUME_LIBRARY_STATUSES, DELIVERY_TYPE_OPTIONS, type WorkbenchJob, type ResumeOptions } from '../shared/workbench.js'
 import type { WorkbenchTaskExecutor } from './task-executor.js'
 
 /**
@@ -31,7 +32,7 @@ const optionalId = z.string().max(64).optional()
   .transform(value => (value ? value : undefined))
 export const resumeStartSpec = z.object({
   id: z.string().uuid(),
-  platform: z.enum(['liepin', 'boss']),
+  platform: z.enum(PLATFORM_KEYS),
   platformJobName: z.string().trim().min(1).max(200).optional(),
   jobId: z.string().min(1).max(64),
   destination: z.string().min(1).max(80),
@@ -56,7 +57,6 @@ type ImportJob = WorkbenchJob & {
 export const receivedResumeStartSpec = z.object({ id: z.string().uuid(), jobId: z.string().min(1).max(64),
   roundId: z.union([z.literal('all'), z.string().uuid()]), attachmentIds: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(500),
   resumeSource: z.literal('platform_received'), confirmed: z.literal(true) }).strict()
-const listUrls = { liepin: 'https://lpt.liepin.com/resume/apply', boss: 'https://www.zhipin.com/web/chat/index' }
 const now = () => new Date().toISOString()
 
 export class ResumeImport implements WorkbenchTaskExecutor {
@@ -167,7 +167,7 @@ export class ResumeImport implements WorkbenchTaskExecutor {
           .filter(prior => prior.id !== job.id && prior.platform === job.platform && Array.isArray(prior.results))
         await runResumeAgent({
           job, agent: options => this.agentOf()(options), broker, signal, priorJobs, logger: this.logger,
-          goal: { entryUrl: listUrls[job.platform], targetJob: options.jobs.find(row => row.id === job.jobId),
+          goal: { entryUrl: platformDefinition(job.platform).receivedEntry, targetJob: options.jobs.find(row => row.id === job.jobId),
             start: '优先读取并复用已有平台标签页。根据实际页面进入收到的简历，不要重复打开已有平台页面。' },
           progress: (phase, message, source) => this.progress(job, phase, message, source),
           ingest: async (ref, page, result, executionSignal) => {

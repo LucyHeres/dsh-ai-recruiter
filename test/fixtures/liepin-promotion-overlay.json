@@ -1,0 +1,521 @@
+{
+  "source": "Actual Liepin recommendation ad-slot overlay captured 2026-10-23; candidate data omitted",
+  "page": {
+    "tabId": 859864256,
+    "snapshotId": "snapshot_085db746-eaaa-4127-93f3-b0fb84da2fbe",
+    "format": "dom",
+    "viewport": {
+      "width": 1920,
+      "height": 934,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "dialogs": [],
+    "truncated": false,
+    "url": "https://lpt.liepin.com/recommend",
+    "documentId": "liepin-recommendation",
+    "items": [
+      {
+        "ref": "ref_21",
+        "role": "button",
+        "name": "",
+        "tagName": "button",
+        "states": [
+          "enabled",
+          "occluded"
+        ],
+        "bounds": {
+          "x": 1860,
+          "y": 56,
+          "width": 28,
+          "height": 28
+        },
+        "parentRef": "ref_20"
+      },
+      {
+        "ref": "ref_33",
+        "role": "link",
+        "name": "",
+        "tagName": "a",
+        "states": [
+          "enabled"
+        ],
+        "bounds": {
+          "x": 800,
+          "y": 220,
+          "width": 320,
+          "height": 400
+        },
+        "href": "https://wow.liepin.com/t1016223/index.html?mscid=FcWLw1h1"
+      },
+      {
+        "ref": "ref_154",
+        "role": "img",
+        "name": "close",
+        "tagName": "span",
+        "states": [
+          "enabled",
+          "occluded"
+        ],
+        "bounds": {
+          "x": 1861,
+          "y": 63,
+          "width": 26,
+          "height": 14
+        },
+        "parentRef": "ref_21"
+      },
+      {
+        "ref": "ref_155",
+        "role": "svg",
+        "name": "",
+        "tagName": "svg",
+        "states": [
+          "enabled",
+          "occluded"
+        ],
+        "bounds": {
+          "x": 1867,
+          "y": 63,
+          "width": 14,
+          "height": 14
+        },
+        "parentRef": "ref_154"
+      },
+      {
+        "ref": "ref_156",
+        "role": "path",
+        "name": "",
+        "tagName": "path",
+        "states": [
+          "enabled",
+          "occluded"
+        ],
+        "bounds": {
+          "x": 1869,
+          "y": 65,
+          "width": 10,
+          "height": 10
+        },
+        "parentRef": "ref_155"
+      },
+      {
+        "ref": "ref_465",
+        "role": "img",
+        "name": "",
+        "tagName": "img",
+        "states": [
+          "enabled"
+        ],
+        "bounds": {
+          "x": 800,
+          "y": 220,
+          "width": 320,
+          "height": 400
+        },
+        "parentRef": "ref_33"
+      },
+      {
+        "ref": "ref_466",
+        "role": "div",
+        "name": "",
+        "tagName": "div",
+        "states": [
+          "enabled"
+        ],
+        "bounds": {
+          "x": 1120,
+          "y": 196,
+          "width": 32,
+          "height": 34
+        },
+        "parentRef": "ref_33"
+      },
+      {
+        "ref": "ref_467",
+        "role": "img",
+        "name": "close-circle",
+        "tagName": "span",
+        "states": [
+          "enabled"
+        ],
+        "bounds": {
+          "x": 1120,
+          "y": 196,
+          "width": 32,
+          "height": 32
+        },
+        "parentRef": "ref_466"
+      },
+      {
+        "ref": "ref_468",
+        "role": "svg",
+        "name": "",
+        "tagName": "svg",
+        "states": [
+          "enabled"
+        ],
+        "bounds": {
+          "x": 1120,
+          "y": 196,
+          "width": 32,
+          "height": 32
+        },
+        "parentRef": "ref_467"
+      },
+      {
+        "ref": "ref_469",
+        "role": "path",
+        "name": "",
+        "tagName": "path",
+        "states": [
+          "enabled"
+        ],
+        "bounds": {
+          "x": 1122,
+          "y": 198,
+          "width": 29,
+          "height": 29
+        },
+        "parentRef": "ref_468"
+      }
+    ]
+  },
+  "inspections": [
+    {
+      "ref": "ref_466",
+      "element": {
+        "ref": "ref_466",
+        "tagName": "div",
+        "attributes": {
+          "class": "adslot-sdk-dialog-close close-3"
+        },
+        "css": {
+          "display": "block",
+          "visibility": "visible",
+          "pointerEvents": "auto",
+          "position": "absolute",
+          "zIndex": "auto",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "opacity": "1"
+        },
+        "visible": true,
+        "bounds": {
+          "x": 1120,
+          "y": 196,
+          "width": 32,
+          "height": 34
+        }
+      },
+      "ancestors": [
+        {
+          "ref": "ref_33",
+          "tagName": "a",
+          "attributes": {},
+          "css": {
+            "display": "inline",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 800,
+            "y": 220,
+            "width": 320,
+            "height": 400
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "adslot-sdk-dialog-content adslot-active"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "absolute",
+            "zIndex": "10",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 800,
+            "y": 220,
+            "width": 320,
+            "height": 400
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "animation adslot-sdk-dialog-container-lp_b_24062601 adslot-sdk-dialog-container"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "absolute",
+            "zIndex": "1001",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 934
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "id": "adslot-sdk-dialog-container-lp_b_24062601"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": false,
+          "bounds": {
+            "x": 0,
+            "y": 3891,
+            "width": 1920,
+            "height": 0
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "id": "AdSlots-lp_b_24062601"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": false,
+          "bounds": {
+            "x": 0,
+            "y": 3891,
+            "width": 1920,
+            "height": 0
+          }
+        },
+        {
+          "tagName": "body",
+          "attributes": {
+            "class": "ant-lpt-theme"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 934
+          }
+        }
+      ]
+    },
+    {
+      "ref": "ref_467",
+      "element": {
+        "ref": "ref_467",
+        "tagName": "span",
+        "attributes": {
+          "class": "anticon anticon-close-circle",
+          "role": "img",
+          "aria-label": "close-circle"
+        },
+        "css": {
+          "display": "inline-flex",
+          "visibility": "visible",
+          "pointerEvents": "auto",
+          "position": "static",
+          "zIndex": "auto",
+          "overflowX": "visible",
+          "overflowY": "visible",
+          "opacity": "0.6"
+        },
+        "visible": true,
+        "bounds": {
+          "x": 1120,
+          "y": 196,
+          "width": 32,
+          "height": 32
+        }
+      },
+      "ancestors": [
+        {
+          "ref": "ref_466",
+          "tagName": "div",
+          "attributes": {
+            "class": "adslot-sdk-dialog-close close-3"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "absolute",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 1120,
+            "y": 196,
+            "width": 32,
+            "height": 34
+          }
+        },
+        {
+          "ref": "ref_33",
+          "tagName": "a",
+          "attributes": {},
+          "css": {
+            "display": "inline",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 800,
+            "y": 220,
+            "width": 320,
+            "height": 400
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "adslot-sdk-dialog-content adslot-active"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "absolute",
+            "zIndex": "10",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 800,
+            "y": 220,
+            "width": 320,
+            "height": 400
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "class": "animation adslot-sdk-dialog-container-lp_b_24062601 adslot-sdk-dialog-container"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "absolute",
+            "zIndex": "1001",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": true,
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 934
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "id": "adslot-sdk-dialog-container-lp_b_24062601"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": false,
+          "bounds": {
+            "x": 0,
+            "y": 3891,
+            "width": 1920,
+            "height": 0
+          }
+        },
+        {
+          "tagName": "div",
+          "attributes": {
+            "id": "AdSlots-lp_b_24062601"
+          },
+          "css": {
+            "display": "block",
+            "visibility": "visible",
+            "pointerEvents": "auto",
+            "position": "static",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "opacity": "1"
+          },
+          "visible": false,
+          "bounds": {
+            "x": 0,
+            "y": 3891,
+            "width": 1920,
+            "height": 0
+          }
+        }
+      ]
+    }
+  ]
+}

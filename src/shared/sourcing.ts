@@ -9,6 +9,8 @@ export interface SourcingPosition {
   /** Current main-system job channel associations, never inferred from past tasks. */
   platforms?: Platform[]
   publishedChannels?: PublishedChannel[]
+  /** Last edited settings, scoped to this position in the local workbench. */
+  settings?: import('./sourcing-settings.js').SourcingSettings
 }
 export interface SourcingSearchFilters { city?: string; experience?: string; education?: string }
 export interface SourcingCriterion {
@@ -24,6 +26,8 @@ export interface SourcingRequirements {
   keyword: string; criteria: SourcingCriterion[]
   rubricVersion?: 2
   supplementCoverage?: SourcingSupplementCoverage[]
+  /** Host-resolved basic conditions, shared by extraction, preview and detail. */
+  basicFilters?: SourcingSearchFilters
   /** Absent on historical runs; new runs must explicitly define their list conditions, including an empty set. */
   listCriteria?: SourcingListCriterion[]
 }
@@ -35,6 +39,8 @@ export interface SourcingAssessment {
 export interface SourcingScoring { version: 2; baseScore: number; bonusScore: number; assessedWeight: number; needsReview: boolean }
 export interface SourcingCandidate {
   key: string; name: string; platform: Platform; profileUrl: string; sourceUrl: string; collectedAt: string
+  /** Verified previous text-key formats, excluding mutable UI contact state. */
+  identityAliases?: string[]
   platformIdentity?: PlatformCandidateIdentity
   communication?: import('./communication.js').CommunicationState
   resumeReceived?: boolean
@@ -42,6 +48,7 @@ export interface SourcingCandidate {
   resumeReceivedAt?: string
   resumeAttachments?: ReceivedResumeAttachment[]
   scope: 'summary' | 'online'; fields: { label: string; value: string }[]; resumeText: string
+  resumeEvidence?: { kind: 'visual'; imageHashes: string[]; pages: number }
   resumeTruncated?: boolean
   assessments: SourcingAssessment[]; filterAssessments?: { field: 'city' | 'education' | 'experience'; state: 'match' | 'mismatch' | 'unknown'; quote: string; reason: string }[]; score: number; coverage: number
   verdict: 'recommended' | 'review' | 'unqualified'; analysis: string; scoring?: SourcingScoring

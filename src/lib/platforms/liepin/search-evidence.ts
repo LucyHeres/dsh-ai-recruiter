@@ -7,6 +7,7 @@ import { sourcingEducationLevels, verifySourcingSearchFilters } from '../../sour
 import { liepinRecommendationControl, recommendationFilterDialog } from './recommendation-controls.js'
 import { verifyPositionEvidence } from '../../position-evidence.js'
 import { positionBusinessIds } from '../../position-controls.js'
+import { liepinDefinition } from './definition.js'
 
 type Field = 'city' | 'experience' | 'education' | 'current_city'
 type Control = { kind: 'position' | 'position_confirm' | 'job_option' | 'filter' | 'filter_open' | 'confirm' | 'search'; field?: Field; selected: boolean; active: boolean; expanded: boolean }
@@ -93,7 +94,7 @@ export class LiepinSearchEvidence {
     }
     const control = this.control(page, proof.ref)
     if (control?.kind !== 'position') return
-    if (this.recommendation(page) && page.items.find((item: any) => item.ref === proof.ref)?.role === 'tab') return verifyPositionEvidence(page, job, proof)
+    if (this.recommendation(page) && page.items.find((item: any) => item.ref === proof.ref)?.role === 'tab') return verifyPositionEvidence(page, job, proof, liepinDefinition.positionAlias)
     const item = readableIdentityRef(page, proof.ref), name = normalized(item.name || item.value)
     const fail = (error: string): PositionOutcome => ({ ok: false, error })
     if (!control.selected) return fail('请关闭顶部招聘职位下拉并核对当前职位，展开选项不能作为已选职位')

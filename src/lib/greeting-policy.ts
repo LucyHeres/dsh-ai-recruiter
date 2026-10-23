@@ -1,9 +1,9 @@
 import { z } from 'zod'
-import type { Platform, GreetingJob, WorkbenchJob } from '../shared/workbench.js'
+import { PLATFORMS, PLATFORM_KEYS, type Platform, type GreetingJob, type WorkbenchJob } from '../shared/workbench.js'
 
-const platformSpec = z.enum(['liepin', 'boss'])
+const platformSpec = z.enum(PLATFORM_KEYS)
 export const searchSpec = z.object({ keyword: z.string().trim().min(1).max(200), city: z.string().trim().min(1).max(80).optional(), ageUnder: z.number().int().min(18).max(100).optional(), experienceMin: z.number().int().min(0).max(60).optional(), experienceMax: z.number().int().min(0).max(60).optional() }).strict().refine(value => value.experienceMin === undefined || value.experienceMax === undefined || value.experienceMin <= value.experienceMax)
-export const greetingStartSpec = z.object({ id: z.string().uuid(), platform: platformSpec, mode: z.enum(['recommend', 'search']).default('recommend'), search: searchSpec.optional(), jobId: z.string().min(1).max(64).optional(), tabId: z.number().int().positive().optional(), limit: z.number().int().min(1).max(100), intervalMinSeconds: z.number().int().min(5).max(600).optional(), intervalMaxSeconds: z.number().int().min(5).max(600).optional(), confirmed: z.literal(true) }).strict().refine(value => value.mode === 'search' ? value.platform === 'liepin' && !!value.search : !value.search, '搜索人才目前只支持猎聘，搜索模式必须提供 search，推荐模式不能携带 search')
+export const greetingStartSpec = z.object({ id: z.string().uuid(), platform: platformSpec, mode: z.enum(['recommend', 'search']).default('recommend'), search: searchSpec.optional(), jobId: z.string().min(1).max(64).optional(), tabId: z.number().int().positive().optional(), limit: z.number().int().min(1).max(100), intervalMinSeconds: z.number().int().min(5).max(600).optional(), intervalMaxSeconds: z.number().int().min(5).max(600).optional(), confirmed: z.literal(true) }).strict().refine(value => value.mode === 'search' ? !!PLATFORMS[value.platform].searchUrl && !!value.search : !value.search, '搜索人才目前只支持猎聘，搜索模式必须提供 search，推荐模式不能携带 search')
 export const DAILY_LIMIT = 100
 export const GREETING_CLICK_INTERVAL_MS = 5000
 export const DEFAULT_GREETING_POLICY = { dailyLimit: DAILY_LIMIT, intervalMinSeconds: 5, intervalMaxSeconds: 5, batchMin: 5, batchMax: 8, batchPauseSeconds: 30 }
@@ -12,7 +12,7 @@ const policySpec = z.object({ dailyLimit: z.number().int().min(1).max(10000), in
 export const greetingPolicy = (value: Partial<GreetingPolicy> = {}): GreetingPolicy => policySpec.parse({ ...DEFAULT_GREETING_POLICY, ...Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) })
 const dayKey = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 export function dailyUsage(jobs: WorkbenchJob[], now = new Date().toISOString()): Record<Platform, number> {
-  const counts = { liepin: 0, boss: 0 }
+  const counts = Object.fromEntries(PLATFORM_KEYS.map(platform => [platform, 0])) as Record<Platform, number>
   for (const job of jobs) {
     const source = job as import('../shared/sourcing.js').SourcingJob
     const rows = job.kind === 'talent_sourcing' ? (source.greetings ?? []).filter(row => !!row.attemptedAt) : !job.kind || job.kind === 'greeting' ? job.results : []

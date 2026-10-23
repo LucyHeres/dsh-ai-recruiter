@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { PLATFORMS, TASK_FEATURES, EXTENSION_INSTALL_URL, taskFeature, type ExtensionInstallation, type TaskKind, type WorkbenchState, type WorkbenchJob, type TaskResultStage, type DeveloperLogs } from '../shared/workbench.js'
+import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, TASK_FEATURES, EXTENSION_INSTALL_URL, taskFeature, type ExtensionInstallation, type TaskKind, type WorkbenchState, type WorkbenchJob, type TaskResultStage, type DeveloperLogs } from '../shared/workbench.js'
 import styles from './style.css'
 import { taskResultRows } from '../shared/greeting-results.js'
 import { greetingLabel, greetingDetail, greetingNotice, hasGreeted } from '../shared/communication.js'
@@ -19,7 +19,6 @@ import { registerSessionPanel } from './session-panel.js'
 import { TaskRecords } from './features/task-records.js'
 import { PositionHome } from './features/position-home.js'
 import { SidePanel } from './components/side-panel.js'
-import { ResumeForm } from './features/resume-form.js'
 import type { JobOption } from '../shared/workbench.js'
 import { SourcingPanel } from './features/sourcing-panel.js'
 import { browserConnectionStatus } from '../shared/connection-status.js'
@@ -60,12 +59,11 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
   const [recordsOpen, setRecordsOpen] = useState(false)
   const [inspectedTask, setInspectedTask] = useState<WorkbenchJob>()
   const [position, setPosition] = useState<JobOption | undefined>(() => navigation?.current())
-  const [resumeOpen, setResumeOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
   const pending = useRef<Record<string, unknown> & { id: string; kind: TaskKind }>()
   const mounted = useRef(true)
   const actionInFlight = useRef(false)
-  useEffect(() => navigation?.subscribe(next => { setPosition(next); setInspectedTask(undefined); setSelectedKind('talent_sourcing'); setSelected({}); setResumeOpen(false); setActivityOpen(false) }), [navigation])
+  useEffect(() => navigation?.subscribe(next => { setPosition(next); setInspectedTask(undefined); setSelectedKind('talent_sourcing'); setSelected({}); setActivityOpen(false) }), [navigation])
 
   useEffect(() => {
     mounted.current = true
@@ -140,7 +138,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
       const job = await rpc<WorkbenchJob>('start', request)
       pending.current = undefined
       setSelectedKind(kind)
-      if (kind === 'resume_import') { setResumeOpen(false); setActivityOpen(true) }
+      if (kind === 'resume_import') setActivityOpen(true)
       setSelected(previous => ({ ...previous, [job.kind]: job.id })); setState(await rpc('state'))
     })
   }
@@ -183,8 +181,8 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
     <style>{styles}</style>
     <header className="air-header">
       <div className="air-header-inner">
-        <div className="air-job-page-title">{position && <button type="button" className="air-sourcing-icon-button" aria-label="返回职位管理" onClick={() => { navigation?.clear(); setPosition(undefined); setInspectedTask(undefined); setResumeOpen(false) }}><ArrowLeftIcon aria-hidden="true" /></button>}<div><h1>{position?.name || '职位管理'}</h1>{position && <p>{[position.department, position.city].filter(Boolean).join(' · ') || '职位招聘'}</p>}</div></div>
-        <div className="air-header-actions">{position && <button type="button" className="air-button air-button-outline" onClick={() => setResumeOpen(true)}><FileTextIcon aria-hidden="true" />简历入库</button>}<button type="button" className="air-text-button air-records-trigger" onClick={() => setRecordsOpen(true)}><CounterClockwiseClockIcon aria-hidden="true" />任务记录</button><BrowserConnectionPopover status={connectionStatus} ready={ready}>
+        <div className="air-job-page-title">{position && <button type="button" className="air-sourcing-icon-button" aria-label="返回职位管理" onClick={() => { navigation?.clear(); setPosition(undefined); setInspectedTask(undefined) }}><ArrowLeftIcon aria-hidden="true" /></button>}<div><h1>{position?.name || '职位管理'}</h1>{position && <p>{[position.department, position.city].filter(Boolean).join(' · ') || '职位招聘'}</p>}</div></div>
+        <div className="air-header-actions"><button type="button" className="air-text-button air-records-trigger" onClick={() => setRecordsOpen(true)}><CounterClockwiseClockIcon aria-hidden="true" />任务记录</button><BrowserConnectionPopover status={connectionStatus} ready={ready}>
           <section id="air-browser-connection" className="air-connection-panel" aria-labelledby="air-connection-title" aria-busy={!state && !connectionError}>
             <div className="air-connection-top">
               <div className="air-connection-heading">
@@ -211,6 +209,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
               <ChevronRightIcon className="air-path-arrow" aria-hidden="true" />
               <Connection label="扩展授权" good={connection?.authenticated} pending={connectingStep === 'authenticated'} detail={connection?.authenticated ? '已授权' : '待授权'} />
             </div>}
+            {connecting && <p className="air-connection-help" role="status">正在等待薪招扩展自动连接，首次可能需要约 1 分钟，最长等待 {ENSURE_TIMEOUT_SECONDS} 秒。</p>}
           </section>
         </BrowserConnectionPopover></div>
       </div>
@@ -227,7 +226,6 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
       {position && knownJobs.some(job => job.id === state?.activeJobId && job.kind === 'resume_import' && (job as WorkbenchJob & {jobId?: string}).jobId === position.id) && <div className="air-resume-live"><span><span className="air-status-dot" />简历正在入库到当前职位</span><button className="air-text-button" type="button" onClick={() => { setSelectedKind('resume_import'); setSelected(previous => ({...previous,resume_import:state?.activeJobId || ''})); setActivityOpen(true) }}>查看入库进度<ArrowRightIcon aria-hidden="true" /></button></div>}
       {position ? <SourcingPanel key={position.id} positionId={position.id} rpc={rpc} state={state} locked={locked} pending={needsReconcile} busy={busy} blockingReason={blockingReason} onStart={settings => startTask(settings, 'talent_sourcing')} onReconcile={reconcileTask} selectedTaskId={selected.talent_sourcing} selectedRecord={inspectedTask?.kind === 'talent_sourcing' ? inspectedTask : undefined} /> : <PositionHome rpc={rpc} onRecruit={job => { setPosition(job); setInspectedTask(undefined); setSelectedKind('talent_sourcing') }} />}
     </div>
-    {resumeOpen && position && <SidePanel title="简历入库" onClose={() => setResumeOpen(false)}><div className="air-resume-panel"><div className="air-resume-context"><b>{position.name}</b><p>将平台已收到的简历附件，导入当前职位。</p></div><ResumeForm positionId={position.id} loadJobOptions={() => rpc('greetingJobOptions', {})} loadResumeOptions={() => rpc('resumeOptions', {})} checkLogin={(platform, open) => rpc('platformLogin', { platform, open })} state={state} locked={locked} busy={busy} pending={needsReconcile} blockingReason={blockingReason} onStart={settings => startTask(settings, 'resume_import')} /></div></SidePanel>}
     {activityOpen && <SidePanel title={current?.kind === 'resume_import' ? '简历入库进度' : '任务详情'} onClose={() => setActivityOpen(false)} className="air-task-activity-panel">
         <section className="air-activity" aria-labelledby="air-activity-title">
           <div className="air-section-heading air-activity-heading"><div><h2 id="air-activity-title">执行进度</h2>{current && <p className="air-task-meta">{resultFeature.label} · {PLATFORMS[current.platform].label}<time dateTime={current.createdAt}>{formatTime(current.createdAt)}</time></p>}</div>

@@ -1,6 +1,7 @@
 import { normalized, statesOf } from '../../page-actions.js'
 import { positionControl, positionNameMatches } from '../../position-controls.js'
 import type { SearchControl } from '../types.js'
+import { liepinDefinition } from './definition.js'
 const hasClass = (node: any, value: string) => String(node?.attributes?.class ?? '').split(/\s+/).some(token => token === value || token.startsWith(`${value}--`))
 export function recommendationFilterDialog(page: any) {
   return (page?.dialogs ?? []).find((dialog: any) => normalized(dialog.text).startsWith('筛选条件') && /学历要求|工作经验/.test(dialog.text))
@@ -15,7 +16,7 @@ export function liepinRecommendationControl(item: any, names: string[], page?: a
   const expanded = states.includes('expanded')
   const name = normalized(item.name)
   if (item.role === 'button' && !item.dialogRef && recommendationFilterLabel(name)) return { kind: 'filter_open', active, selected: false, expanded }
-  if (item.role === 'tab' && positionControl(page, item) && names.some(n => positionNameMatches(page, item, n))) {
+  if (item.role === 'tab' && positionControl(page, item) && names.some(n => positionNameMatches(page, item, n, liepinDefinition.positionAlias))) {
     return { kind: selected ? 'position' : 'job_option', active, selected, expanded }
   }
   if (!expanded && ['button', 'combobox'].includes(item.role) && !['input', 'textarea'].includes(String(item.tagName).toLowerCase())) {

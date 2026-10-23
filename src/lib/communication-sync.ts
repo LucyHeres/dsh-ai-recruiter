@@ -63,9 +63,8 @@ export function communicationScope(page: any, platform: Platform): 'chat' | 'rec
   try {
     const url = new URL(page.url)
     if (!(PLATFORMS[platform].origins as readonly string[]).includes(url.origin) || page.isLoginPage || page.dialogs?.length) return
-    if (platform === 'liepin' && url.pathname === '/resume/apply' && (/收到简历|已收简历/.test(page.title ?? '')
-      || (page.selectedTabs ?? []).some((tab: any) => /^(?:收到简历|已收简历)$/.test(tab.name)))) return 'received_list'
-    if (platform === 'liepin' && url.pathname === '/chat/im' || platform === 'boss' && url.pathname === '/web/chat/index') return 'chat'
+    // 页面语义由平台自己声明；通用流程不按平台名判断路径。
+    return platformDefinition(platform).communication?.scope(page)
   } catch { /* Unsupported source. */ }
 }
 
@@ -76,6 +75,7 @@ export interface CommunicationObservation {
 /** Same-page card ownership binds each status to its profile evidence. */
 export async function readCommunicationObservations(platform: Platform, page: any, broker: AgentBrowserTools,
   targets: SourcingCandidate[], signal: AbortSignal, listEvidence?: 'greeted' | 'resume_received'): Promise<CommunicationObservation[]> {
+  const communication = platformDefinition(platform).communication
   const source = communicationScope(page, platform)
   if (!source) return []
   const seeds = page.items.filter((item: any) => readable(item) && !item.dialogRef && (
@@ -95,7 +95,8 @@ export async function readCommunicationObservations(platform: Platform, page: an
     await broker.inspectRefs(page, [seed.ref], signal, true, true)
     const inspection = broker.getInspection(page, seed.ref)
     const inspectedNodes = [inspection?.element, ...(inspection?.ancestors ?? [])]
-    const receivedCard = inspectedNodes.some(node => String(node?.attributes?.class ?? '').split(/\s+/).includes('manager-resume-card-item-new'))
+    const receivedCard = !!communication?.receivedWrapper
+      && inspectedNodes.some(node => String(node?.attributes?.class ?? '').split(/\s+/).includes(communication.receivedWrapper!))
     for (const node of inspectedNodes) {
       if (!node || ['body', 'html', 'main'].includes(node.tagName)) break
       const attrs = node.attributes ?? {}, before = identityTokens.length
@@ -104,18 +105,8 @@ export async function readCommunicationObservations(platform: Platform, page: an
         const kind = fieldKey(key.slice(5)), value = String(raw)
         if (kind && validId(value)) identityTokens.push(`${kind}:${value}`)
       }
-      // This exact Liepin wrapper is also the sourcing driver's identity anchor.
-      const classes = String(attrs.class ?? '').split(/\s+/)
-      if (classes.includes('xpath-resume-item-wrap')) for (const token of classes) {
-        const id = /^xpath-resume-item-wrap-([A-Za-z0-9_-]{8,160})$/.exec(token)?.[1]
-        if (id) identityTokens.push(`resume:${id}`)
-      }
-      // Received-list wrappers observed on /resume/apply: the final numeric
-      // suffix is the row index, while the preceding value is the resume key.
-      if (platform === 'liepin' && source === 'received_list' && classes.includes('manager-resume-card-item-new')) for (const token of classes) {
-        const id = /^resume-item-wrap-([A-Za-z0-9_-]{8,160})_\d+$/.exec(token)?.[1]
-        if (id) identityTokens.push(`resume:${id}`)
-      }
+      // 平台自己声明的包装类/节点语义；通用代码不解析具体类名。
+      for (const token of communication?.identity?.(node, source) ?? []) identityTokens.push(token)
       if (identityTokens.length > before) break
     }
     if (!identityTokens.length) continue
@@ -158,7 +149,10 @@ export async function syncPlatformCommunication(broker: AgentBrowserTools, platf
   const facts = new Map(targets.map(target => [candidateContactKeys(target)[0]!, { greeted: target.communication === 'recorded', resumeReceived: !!target.resumeReceived }]))
   const complete = () => [...facts.values()].every(row => row.greeted && row.resumeReceived)
   const matched = new Set<string>(), updated = new Set<string>(); let sourceCount = 0, partial = false
-  const entries = platform === 'liepin' ? [platformDefinition(platform).receivedEntry, 'https://lpt.liepin.com/chat/im'] : [platformDefinition(platform).receivedEntry]
+  const communication = platformDefinition(platform).communication
+  // 缺能力时明确失败，不让通用流程在未知页面上静默返回“未匹配”。
+  if (!communication?.entries.length) throw new Error(`PLATFORM_CAPABILITY_UNSUPPORTED: ${platform} 尚未声明沟通列表入口`)
+  const entries = communication.entries
   const existingTabs = (await broker.tools.find(tool => tool.name === 'browser_list_tabs')!.execute({}, signal) as any).tabs ?? []
   const origin = new URL(PLATFORMS[platform].url).origin
   const existing = existingTabs.filter((tab: any) => { try { return new URL(tab.url).origin === origin } catch { return false } })

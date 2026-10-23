@@ -135,7 +135,7 @@ export class GreetingAgent {
           const target = page.items.find((item: any) => item.ref === call.args.ref)
           if (completedGreetingLabels.has(normalized(target?.name))) throw new Error('TASK_ALREADY_CONTACTED: 继续沟通或已沟通的候选人不可重复打招呼')
           const directGreeting = call.name === 'browser_click' && greetingLabels(job.platform).has(normalized(target?.name))
-          if (job.platform === 'liepin' && call.name === 'browser_click' && !directGreeting) throw new Error('TASK_GREETING_CONTROL_REQUIRED: 猎聘只允许点击当前候选人的立即沟通按钮')
+          if (recruitmentPlatform(job.platform).greeting?.requireDirectButton && call.name === 'browser_click' && !directGreeting) throw new Error(`TASK_GREETING_CONTROL_REQUIRED: ${PLATFORMS[job.platform].label}只允许点击当前候选人的立即沟通按钮`)
           const operation = pending
           if (directGreeting && (page.snapshotId !== operation.selection.snapshotId || call.args.ref !== operation.selection.ref)) {
             const adapter = recruitmentPlatform(job.platform)
