@@ -53,7 +53,7 @@ export function sourcingResults(jobs: SourcingJob[], jobId: string, roundId: str
   const run = selected ?? ordered.find(job => ['running', 'queued', 'stopping'].includes(job.status)) ?? ordered[0]
   const seen = new Set<string>()
   const visibleCandidates = (selected ? [selected] : ordered).flatMap(job => job.candidates.filter(candidate => {
-    if (!candidate.scoring?.needsReview && !sourcingCandidateQualified(candidate, sourcingMinimumScore(job)) || !selected && seen.has(candidate.key)) return false
+    if (!sourcingCandidateQualified(candidate, sourcingMinimumScore(job)) || !selected && seen.has(candidate.key)) return false
     seen.add(candidate.key); return true
   }).map(candidate => ({
     minimumScore: sourcingMinimumScore(job), key: candidate.key, resultKey: `${job.id}:${candidate.key}`, roundId: job.id, roundNumber: roundNumbers.get(job.id)!, roundCreatedAt: job.createdAt,

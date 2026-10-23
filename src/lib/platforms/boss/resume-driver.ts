@@ -5,12 +5,13 @@ import type { AgentBrowserTools } from '../../agent-browser-tools.js'
 import type { ResumeCaptureContext } from '../types.js'
 import { assertCandidateQuote } from '../../candidate-evidence.js'
 import { frameUrl, normalized, statesOf } from '../../page-actions.js'
+import { bossDocumentUrl } from './search-evidence.js'
 
 const bindings = new WeakMap<AgentBrowserTools, { name: string; documentId: string; frameId: number }>()
 const hasClass = (node: any, name: string) => String(node?.attributes?.class ?? '').split(/\s+/).includes(name)
 const readable = (item: any) => item?.ref && !statesOf(item).some(state => ['hidden', 'invisible', 'blocked_by_dialog'].includes(state))
 const resumeFrame = (frame: any) => {
-  try { const url = new URL(frameUrl(frame)); return frame.frameId > 0 && url.origin === 'https://www.zhipin.com' && url.pathname.replace(/\/$/, '') === '/web/frame/c-resume' } catch { return false }
+  try { const url = new URL(frameUrl({ ...frame, url: bossDocumentUrl(frame) })); return frame.frameId > 0 && url.origin === 'https://www.zhipin.com' && url.pathname.replace(/\/$/, '') === '/web/frame/c-resume' } catch { return false }
 }
 export function bossResumeClose(page: any, ref: string, broker: AgentBrowserTools) {
   const detail = broker.getInspection(page, ref)

@@ -785,6 +785,7 @@ const sweepTimer = setInterval(() => {
 sweepTimer.unref?.()
 
 server.listen(PORT, '127.0.0.1', () => {
+  require('./connection-notification.cjs').notifyExtension(LOCAL_CONFIG_PATH)
   console.log(`[gateway] 网关已启动`)
   console.log(`[gateway]   唤醒页   http://127.0.0.1:${PORT}/wake`)
   console.log(`[gateway]   WS 端点  ws://127.0.0.1:${PORT}/ws`)

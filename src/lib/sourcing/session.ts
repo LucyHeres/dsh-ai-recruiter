@@ -222,7 +222,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
       }
     },
   })
-  const status = () => ({ recorded: qualifiedCount(), reviewCount: job.candidates.filter(candidate => candidate.scoring?.needsReview).length, limit: totalTarget, channelCount: qualifiedCount() - before, channelLimit: quota, requirements: job.requirements, searchFilters: job.searchFilters, minimumScore, searchReady, phase, pending: pending?.name, scanned: job.scanned, skippedLowScore: job.skippedLowScore, needsGreeting: !!greeter.awaiting, candidateKey: greeter.awaiting ?? pending?.key, selectedCandidate: selectedCandidate() })
+  const status = () => ({ recorded: qualifiedCount(), limit: totalTarget, channelCount: qualifiedCount() - before, channelLimit: quota, requirements: job.requirements, searchFilters: job.searchFilters, minimumScore, searchReady, phase, pending: pending?.name, scanned: job.scanned, skippedLowScore: job.skippedLowScore, needsGreeting: !!greeter.awaiting, candidateKey: greeter.awaiting ?? pending?.key, selectedCandidate: selectedCandidate() })
   const confirmSearch = async (input: z.infer<typeof sourcingSearchConfirmationSpec>, toolSignal: AbortSignal) => {
     if (!job.requirements) throw new Error('SEARCH_CONDITIONS_UNVERIFIED: 请先提炼职位要求')
     const page = broker.getPage(input.tabId, input.snapshotId), item = readableIdentityRef(page, input.ref)
@@ -374,10 +374,13 @@ export async function createSourcingSession(ctx: SessionOptions) {
       return { skipped: true, qualified: false, score: assessment.score }
     }
     const hardConflict = !!assessment.scoring && assessment.verdict === 'unqualified'
-    if (hardConflict || assessment.score < minimumScore && !assessment.scoring?.needsReview) {
-      diagnose('info', 'candidate_discarded', { candidateKey: pending.key, reason: hardConflict ? 'final_required_condition_mismatch' : 'final_score_below_minimum', score: assessment.score, coverage: assessment.coverage, minimumScore })
-      rejected.add(pending.key); pending = undefined; job.skippedLowScore = (job.skippedLowScore ?? 0) + 1
-      await ctx.progress(job, 'reading', hardConflict ? `${candidateLabel}详细评估发现硬性条件明确不符，已跳过并继续寻聘` : `${candidateLabel}详细评估未达到${minimumScore}分，已丢弃本次采集信息并跳过`)
+    const insufficientEvidence = !!assessment.scoring?.needsReview
+    if (hardConflict || insufficientEvidence || assessment.score < minimumScore) {
+      diagnose('info', 'candidate_discarded', { candidateKey: pending.key, reason: hardConflict ? 'final_required_condition_mismatch' : insufficientEvidence ? 'final_evidence_insufficient' : 'final_score_below_minimum', score: assessment.score, coverage: assessment.coverage, minimumScore })
+      rejected.add(pending.key); pending = undefined
+      if (insufficientEvidence) job.skippedUnverified = (job.skippedUnverified ?? 0) + 1
+      else job.skippedLowScore = (job.skippedLowScore ?? 0) + 1
+      await ctx.progress(job, 'reading', hardConflict ? `${candidateLabel}详细评估发现硬性条件明确不符，已跳过并继续寻聘` : insufficientEvidence ? `${candidateLabel}详细评估的硬性条件或核心能力证据不足，未达标，已跳过并继续寻聘` : `${candidateLabel}详细评估未达到${minimumScore}分，已丢弃本次采集信息并跳过`)
       return { skipped: true, qualified: false, score: assessment.score }
     }
     const scope = 'online' as const
@@ -385,11 +388,11 @@ export async function createSourcingSession(ctx: SessionOptions) {
     job.candidates.push({ name: pending.name, key: pending.key, ...(pending.identityAliases.length ? { identityAliases: pending.identityAliases } : {}), profileUrl: pending.profileUrl, platformIdentity: pending.platformIdentity, platform: channel.platform, sourceUrl: safePageUrl(page.url), collectedAt: now(), scope, resumeTruncated: truncated,
       fields: input.fields, resumeText, ...(capture.evidence ? { resumeEvidence: capture.evidence } : {}), listAssessments: pending.listAssessments, assessments: input.assessments, filterAssessments: input.filterAssessments, analysis: input.analysis, ...assessment })
     channel.candidateCount = qualifiedCount() - before
-    job.results.push({ key: pending.key, name: pending.name, stage: 'succeeded', detail: `匹配 ${assessment.score}/100 · ${assessment.coverage < 100 ? '有信息待核实' : '已读原文评估'}`, updatedAt: now() })
-    if (!assessment.scoring?.needsReview) greeter.queue(job.candidates[job.candidates.length - 1], pending.identity, page, foregroundSource)
+    job.results.push({ key: pending.key, name: pending.name, stage: 'succeeded', detail: `匹配 ${assessment.score}/100 · ${assessment.coverage < 100 ? '达标，部分材料未说明' : '已读原文评估'}`, updatedAt: now() })
+    greeter.queue(job.candidates[job.candidates.length - 1], pending.identity, page, foregroundSource)
     previous.add(pending.key); pending = undefined
     phase = 'reading'
-    await ctx.progress(job, 'reading', assessment.scoring?.needsReview ? `${candidateLabel}有重要信息待核实，已保留分析；继续寻找达标人选` : `${PLATFORMS[channel.platform].label}已保存 ${channel.candidateCount}/${quota} 位达标人选 · ${candidateLabel}`)
+    await ctx.progress(job, 'reading', `${PLATFORMS[channel.platform].label}已保存 ${channel.candidateCount}/${quota} 位达标人选 · ${candidateLabel}`)
     diagnose('info', 'candidate_recorded', { candidateKey, scope, score: assessment.score, coverage: assessment.coverage,
       capturedCharacters: resumeText.length, candidateCount: job.candidates.length, saved: true })
     return status()

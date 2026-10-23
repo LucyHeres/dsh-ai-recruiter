@@ -209,7 +209,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
               <ChevronRightIcon className="air-path-arrow" aria-hidden="true" />
               <Connection label="扩展授权" good={connection?.authenticated} pending={connectingStep === 'authenticated'} detail={connection?.authenticated ? '已授权' : '待授权'} />
             </div>}
-            {connecting && <p className="air-connection-help" role="status">正在等待薪招扩展自动连接，首次可能需要约 1 分钟，最长等待 {ENSURE_TIMEOUT_SECONDS} 秒。</p>}
+            {connecting && <p className="air-connection-help" role="status">正在唤醒薪招扩展并连接，最长等待 {ENSURE_TIMEOUT_SECONDS} 秒。</p>}
           </section>
         </BrowserConnectionPopover></div>
       </div>

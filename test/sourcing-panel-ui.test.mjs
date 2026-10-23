@@ -442,14 +442,14 @@ test('active attachment upload exposes progress and stop within the same talent 
 
 
 test('tiered rubrics show preferences, unknown facts, inference and interview questions without zero-point penalties', () => {
- const criteria=[{id:'core',tier:'core',label:'核心开发能力',weight:100},{id:'bonus',tier:'bonus',label:'上一段任职超过2年',weight:10},{id:'verify',tier:'verify',label:'编码习惯与规范',weight:0}].map(row=>({...row,must:false,quote:row.label}))
- const scoring={version:2,baseScore:0,bonusScore:0,assessedWeight:0,needsReview:true}
- const candidate={...people[1],score:0,coverage:0,scoring,assessments:criteria.map(c=>({criterionId:c.id,state:'unknown',quote:'',reason:'材料不足',verificationQuestion:'请说明相关实际工作。'}))}
+ const criteria=[{id:'core',tier:'core',label:'核心开发能力',weight:30},{id:'bonus',tier:'bonus',label:'上一段任职超过2年',weight:10},{id:'verify',tier:'verify',label:'编码习惯与规范',weight:0},{id:'known',tier:'core',label:'项目实现',weight:70}].map(row=>({...row,must:false,quote:row.label}))
+ const scoring={version:2,baseScore:100,bonusScore:0,assessedWeight:70,needsReview:false}
+ const candidate={...people[1],score:100,coverage:70,scoring,assessments:criteria.map(c=>({criterionId:c.id,state:c.id==='known'?'match':'unknown',quote:c.id==='known'?'项目实现':'',reason:'材料不足',verificationQuestion:'请说明相关实际工作。'}))}
  const requirements={rubricVersion:2,criteria,supplementCoverage:[{quote:'优先上一段工作经历超过2年',criterionIds:['bonus'],listFields:[]}]}
- const result={...results,candidates:[{...summaries[1],score:0,scoring}]}
+ const result={...results,candidates:[{...summaries[1],score:100,scoring}]}
  const view=fixture({results:result,detailData:{...details(1),candidate,requirements}}),tree=view.render()
- assert.equal(cards(tree).length,1,'below-threshold review candidates must stay visible')
- assert.match(text(tree),/待核实/);assert.match(text(tree),/暂评分/);assert.match(text(tree),/不计入达标人数/)
+ assert.equal(cards(tree).length,1,'qualified candidates can retain individual unknown facts')
+ assert.match(text(tree),/材料未说明/);assert.doesNotMatch(text(tree),/待核实|暂评分|保留待核实/)
  const rows=elements(tree).filter(row=>row?.props?.className==='air-sourcing-assessment')
  assert.match(text(rows[0]),/不计入分母/)
  assert.match(text(rows[1]),/加分项/);assert.match(text(rows[1]),/暂未加分/)

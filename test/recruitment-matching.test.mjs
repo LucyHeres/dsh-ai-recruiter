@@ -112,11 +112,26 @@ test('preferences and previous-role tenure do not become total-experience, educa
   }
 })
 
-test('review candidates remain visible below the threshold, with their provisional score and no accepted count', () => {
+test('historical review candidates do not reenter the qualified list and their stored records remain intact', () => {
   const candidate = { key: 'review', name: '测试候选人', platform: 'liepin', score: 0, coverage: 0, verdict: 'review', fields: [],
     scoring: { version: 2, baseScore: 0, bonusScore: 0, assessedWeight: 0, needsReview: true } }
   const job = { id: 'round', jobId: 'python', kind: 'talent_sourcing', candidates: [candidate], createdAt: '2026-10-21', channels: [], minimumScore: 60, limit: 1 }
   const result = sourcingResults([job], 'python', 'all', new Map())
-  assert.equal(result.candidates.length, 1); assert.equal(result.candidates[0].scoring.needsReview, true)
+  assert.equal(result.candidates.length, 0); assert.equal(job.candidates.length, 1)
   assert.equal(result.current.candidateCount, 0); assert.equal(result.rounds[0].candidateCount, 0)
+})
+
+test('concrete implementation evidence supports foundation skills without repeating the JD keywords', async () => {
+  const text = '独立实现树形权限继承、数据去重索引和任务优先级调度，优化检索排序，将接口响应从800ms降至120ms。'
+  const standard = { ...requirements, criteria: [core('基本数据结构和算法', 100)] }
+  const [judgement] = await evaluateSources(async opts => {
+    assert.match(opts.system, /具体职责本身就是能力证据/)
+    assert.match(opts.system, /先跨工作和项目寻找本人承担/)
+    await opts.tools[0].execute({ candidates: [{ sourceId: 'one', assessments: [{ criterionId: '基本数据结构和算法', state: 'match', evidenceId: 0,
+      evidenceKind: 'direct', confidence: 'high', reason: '本人实现树形权限、去重索引及调度，直接体现基础数据组织和算法应用。' }] }] })
+    return done
+  }, standard, [{ sourceId: 'one', name: '测试候选人', text }], new AbortController().signal)
+  const result = assessCandidate(standard.criteria, judgement.assessments, text)
+  assert.equal(result.score, 100)
+  assert.equal(sourcingCandidateQualified(result, 60), true)
 })

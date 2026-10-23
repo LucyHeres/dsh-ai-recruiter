@@ -1,4 +1,5 @@
-import { StandardPositionRoute, type RecruitmentPlatform } from '../types.js'
+import { type RecruitmentPlatform } from '../types.js'
+import { BossPositionRoute } from './position-route.js'
 import { bossDefinition } from './definition.js'
 import { BossSearchEvidence } from './search-evidence.js'
 import { BossSourcingDriver } from './sourcing-driver.js'
@@ -16,6 +17,6 @@ export const bossPlatform: RecruitmentPlatform = {
   allowsNavigation: bossReadOnlyControl,
   observationFormat: 'dom',
   createSearchEvidence: () => new BossSearchEvidence(),
-  createPositionRoute: () => new StandardPositionRoute(),
+  createPositionRoute: () => new BossPositionRoute(),
   createSourcingDriver: context => new BossSourcingDriver(context),
 }

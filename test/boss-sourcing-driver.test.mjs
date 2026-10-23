@@ -30,7 +30,7 @@ async function fixture(options = {}) {
   let revision = 0, detail = false, returned = false, selected = options.selected !== false
   let stale = !!options.staleCanvas, canvasFailure = false
   let frameMode = false, frameNavigations = 0
-  let frameReads = 0, frameJobId = options.frameJobId ?? 'job123', positionMenu = false
+  let frameReads = 0, frameJobId = options.frameJobId ?? 'job123', positionMenu = !!options.menuInitiallyOpen
   let visualMode = false, canvasY = 0, transcriptions = 0, contactMade = false
   const images = new Map(), messages = []
   let navigationCalls = 0, assessments = 0, greetings = 0, snapshots = 0, scrolls = 0
@@ -62,13 +62,16 @@ async function fixture(options = {}) {
   ]
   const page = () => {
     if ((stale || options.canvas && detail) && visualMode) return { tabId: 1, frameId: 2, frameInteraction: 'same-origin',
-      snapshotId: `s${revision}`, documentId: stale ? 'old-resume-canvas' : 'boss-resume-canvas', url: 'https://www.zhipin.com/web/frame/c-resume/?source=recommend',
+      snapshotId: `s${revision}`, documentId: stale ? 'old-resume-canvas' : 'boss-resume-canvas',
+      url: options.outerUrl ? entry : 'https://www.zhipin.com/web/frame/c-resume/?source=recommend',
+      ...(options.outerUrl ? { frameUrl: 'https://www.zhipin.com/web/frame/c-resume/?source=recommend' } : {}),
       format: 'dom', viewport: { width: 774, height: 1600 }, dialogs: [],
       items: [{ ref: 'canvas', role: 'canvas', tagName: 'canvas', name: '', bounds: { x: 0, y: canvasY, width: 774, height: 800 } }] }
     const shell = options.frame && !frameMode
     const document = options.document && frameMode
     return { tabId: 1, snapshotId: `s${revision}`, documentId: frameMode ? 'boss-frame-document' : 'boss-document', format: 'dom',
-    url: frameMode ? `https://www.zhipin.com/web/frame/recommend/?jobid=${frameJobId}` : entry,
+    url: frameMode && !options.outerUrl ? `https://www.zhipin.com/web/frame/recommend/?jobid=${frameJobId}` : entry,
+    ...(frameMode && options.outerUrl ? { frameUrl: `https://www.zhipin.com/web/frame/recommend/?jobid=${frameJobId}` } : {}),
     frameId: frameMode ? 1 : 0, ...(frameMode ? { tabUrl: entry, frameInteraction: options.legacyFrame ? undefined : 'same-origin' } : {}),
     viewport: { width: 1440, height: 800, scrollY: 0 }, selectedTabs: shell || document ? [] : selected ? [{ name: 'Java工程师', elementId: options.dynamicId === undefined ? 'job-job123' : options.dynamicId }] : [],
     dialogs: !shell && detail && !options.canvas ? [{ ref: 'resume', text: full, closeRef: 'close' }] : !shell && options.unexpected ? [{ ref: 'unexpected', text: '新的业务提示，请理解后处理' }] : [],
@@ -77,9 +80,14 @@ async function fixture(options = {}) {
       { ref: 'close', role: 'button', name: '关闭', dialogRef: 'resume' }]
       : document ? [...documentItems().map(item => {
         if (!['job-title', 'job-title-inner'].includes(item.ref)) return item
-        return { ...item, ...(frameJobId !== 'job123' ? { name: '产品经理 _ 上海 13-20K' } : {}),
+        const title = frameJobId !== 'job123' ? '产品经理 _ 上海 13-20K' : item.name
+        return { ...item, name: options.realMenu && positionMenu && item.ref === 'job-title' ? `${title} ${title} Java工程师 _ 上海 13-20K 调整顺序` : title,
           ...(returned && options.returnedTitleState ? { states: [options.returnedTitleState] } : {}) }
-      }), ...(positionMenu ? [{ ref: 'position', role: 'option', name: 'Java工程师', elementId: 'job-job123' }] : []),
+      }), ...(positionMenu ? options.realMenu ? [
+        { ref: 'job-list', role: 'ul', name: 'Java工程师 _ 上海 13-20K', parentRef: 'job-title', bounds: { x: 880, y: 80, width: 280, height: 88 } },
+        { ref: 'position', role: 'li', name: `${options.missingTarget ? '其他职位' : 'Java工程师'} _ 上海 13-20K`, parentRef: 'job-list', bounds: { x: 880, y: 80, width: 280, height: 44 } },
+        { ref: 'position-inner', role: 'span', name: 'Java工程师 _ 上海 13-20K', parentRef: 'position' },
+      ] : [{ ref: 'position', role: 'option', name: 'Java工程师', elementId: 'job-job123' }] : []),
         ...(scrolls && options.exhaustAfterDiscard ? [{ ref: 'end', role: 'div', name: '没有更多', bounds: { x: 100, y: 600, width: 100, height: 30 } }] : [])]
       : [{ ref: 'position', role: 'tab', name: 'Java工程师', elementId: options.dynamicId === undefined ? 'job-job123' : options.dynamicId, states: selected ? ['selected'] : [] },
         ...(options.duplicatePosition ? [{ ref: 'position2', role: 'tab', name: 'Java工程师', elementId: 'job-other456', states: [] }] : []),
@@ -142,8 +150,8 @@ async function fixture(options = {}) {
       revision++; return { dispatched: true, snapshot: page() }
     }
     assert.equal(name, 'browser_click')
-    if (args.ref === 'job-title') positionMenu = true
-    if (args.ref === 'position') { selected = true; positionMenu = false; frameJobId = 'job123' }
+    if (args.ref === 'job-title' || args.ref === 'job-title-inner') positionMenu = !positionMenu
+    if (args.ref === 'position' && !options.selectionNoChange) { selected = true; positionMenu = false; frameJobId = 'job123' }
     if (args.ref === 'card') {
       assert.equal(stale, false, 'close the old resume before opening a newly selected candidate')
       if (options.unknownOpen) throw Error('TOOL_CALL_OUTCOME_UNKNOWN')
@@ -258,6 +266,18 @@ test('BOSS greeting state changes do not reopen, rescore or count the same text-
   assert.equal(f.assessments, 2)
   assert.equal(f.inputs.filter(input => input.name === 'browser_click' && input.ref === 'card').length, 1)
   assert.ok(f.scrolls > 0, 'continue looking for another person instead of fulfilling the quota with the same card')
+})
+
+test('BOSS Canvas snapshot with an outer recommendation URL uses its same-origin frame URL through capture and return', async () => {
+  const f = await fixture({ frame: true, document: true, canvas: true, outerUrl: true, autoGreet: true })
+  assert.equal(f.result.status, 'completed', JSON.stringify(f.routes))
+  assert.equal(f.navigationCalls, 0)
+  assert.equal(f.transcriptions, 1)
+  assert.equal(f.job.candidates.length, 1)
+  assert.equal(f.job.candidates[0].scope, 'online')
+  assert.equal(f.job.candidates[0].resumeEvidence.kind, 'visual')
+  assert.equal(f.job.candidates[0].resumeEvidence.pages, 3)
+  assert.deepEqual(f.inputs.filter(input => input.name === 'browser_click').map(input => input.ref), ['card', 'visual-close', 'greet'])
 })
 
 test('BOSS recognizes old saved full-card keys across contact labels before opening a resume', async () => {
@@ -417,6 +437,25 @@ test('BOSS switches a recommendation frame showing another job to the linked pla
   assert.equal(f.frameNavigations, 0)
   assert.deepEqual(f.inputs.map(input => input.ref), ['job-title', 'position', 'card'])
   assert.equal(f.job.candidates.length, 1)
+})
+
+test('real BOSS li dropdown with decorated names converges without toggling and verifies the frame URL', async () => {
+  for (const menuInitiallyOpen of [false, true]) {
+    const f = await fixture({ frame: true, document: true, realMenu: true, outerUrl: true, frameJobId: 'other999', menuInitiallyOpen })
+    assert.equal(f.result.status, 'completed', f.result.message)
+    assert.equal(f.navigationCalls, 0)
+    assert.deepEqual(f.inputs.map(input => input.ref), [...(menuInitiallyOpen ? [] : ['job-title']), 'position', 'card'])
+  }
+})
+
+test('missing or ineffective BOSS menu choices never toggle the header repeatedly', async () => {
+  for (const extra of [{ missingTarget: true }, { selectionNoChange: true }]) {
+    const f = await fixture({ frame: true, document: true, realMenu: true, frameJobId: 'other999', ...extra })
+    assert.equal(f.result.status, 'stopped')
+    assert.equal(f.inputs.filter(input => input.ref === 'job-title').length, 1)
+    assert.ok(f.inputs.filter(input => input.ref === 'position').length <= 1)
+    assert.equal(f.job.candidates.length, 0)
+  }
 })
 
 test('BOSS document title alone cannot impersonate the linked job', async () => {

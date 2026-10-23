@@ -3,7 +3,7 @@ import { SourcingBrowser, SourcingHandoff, requireSingle } from '../../sourcing/
 import type { SourcingCard, SourcingDriver, SourcingDriverContext, ResumeLocator, SearchConfirmation } from '../../sourcing/types.js'
 import { findPositionEvidence } from '../../position-evidence.js'
 import { positionBusinessIds, positionChoices, positionControl, positionNameMatches } from '../../position-controls.js'
-import { bossDocumentSelector, bossDocumentTitle, verifyBossDocumentPosition } from './search-evidence.js'
+import { bossDocumentSelector, bossDocumentTitle, bossDocumentUrl, bossPositionMenu, bossPositionChoices, isBossRecommendationDocument, verifyBossDocumentPosition } from './search-evidence.js'
 import { readCandidate } from '../../candidate-entry.js'
 import { assertCandidateQuote } from '../../candidate-evidence.js'
 import { frameUrl, normalized, statesOf } from '../../page-actions.js'
@@ -33,6 +33,7 @@ export class BossSourcingDriver implements SourcingDriver {
   private opened?: SourcingCard
   private previous?: string
   private stalled = 0
+  private readonly positionAttempts = new Set<string>()
   constructor(private readonly context: SourcingDriverContext) {
     this.browser = new SourcingBrowser(context.broker, context.signal)
     this.resumes = new BossResumeDriver(context)
@@ -78,7 +79,7 @@ export class BossSourcingDriver implements SourcingDriver {
     throw new SourcingHandoff('boss_recommendation_not_ready')
   }
   private onEntryDocument(page: any) {
-    return this.entryAliases.some(alias => isSourcingEntry(page?.url, alias))
+    return isBossRecommendationDocument(page)
   }
   private async awaitRecommendationList() {
     for (let settle = 0; settle < 6; settle++) {
@@ -142,9 +143,16 @@ export class BossSourcingDriver implements SourcingDriver {
       if (this.documentProof()) return this.proof()
       if (this.position()) return this.proof()
       const page = this.page()
+      const menu = bossPositionMenu(page)
+      const menuChoices = bossPositionChoices(page, targets.map(target => target.name || ''))
       const choices = page.items.filter((item: any) => visible(item, page) && !statesOf(item).some(state => ['selected', 'checked', 'current'].includes(state)) && ['tab', 'option', 'menuitem'].includes(item.role)
         && targets.some(target => normalized(item.name) === normalized(target.name)))
-      if (choices.length) await this.browser.click(requireSingle<any>(positionChoices(page, choices, targets), 'boss_job_choices_ambiguous').ref)
+      const signature = hash({ url: bossDocumentUrl(page), title: bossDocumentSelector(page)?.name,
+        options: (menu?.options ?? choices).map((item: any) => normalized(item.name)) })
+      if (this.positionAttempts.has(signature)) throw new SourcingHandoff('boss_job_selection_stalled')
+      this.positionAttempts.add(signature)
+      if (menu) await this.browser.click(requireSingle<any>(menuChoices, menuChoices.length ? 'boss_job_choices_ambiguous' : 'boss_job_choice_missing').ref)
+      else if (choices.length) await this.browser.click(requireSingle<any>(positionChoices(page, choices, targets), 'boss_job_choices_ambiguous').ref)
       else {
         // 顶部「职位名 _ 城市 薪资」自身就是招聘职位下拉触发器（没有独立的
         // 「不限职位」控件）。URL jobid 没能切到目标职位时，点它打开职位列表。

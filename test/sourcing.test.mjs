@@ -703,7 +703,7 @@ test('raising the detail threshold never blocks a qualified list card, but rejec
   await tools.openResume()
   await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:unknown,analysis:'尚无已证实匹配项'})
  },{minimumScore:0})
- assert.equal(zero.job.candidates[0].score,0)
+ assert.equal(zero.job.candidates.length,0);assert.equal(zero.job.skippedUnverified,1)
 })
 test('unknown required list evidence logs the candidate name but retains no resume or result and cannot open details',async()=>{
  const out=await fixture(async tools=>{
@@ -772,15 +772,28 @@ test('no explicit basic-information requirements allows detail reading despite z
  },{position:{...position,city:''},listCriteria:[],minimumScore:100})
  assert.equal(out.job.status,'stopped',out.job.detail)
 })
-test('missing core evidence is retained for review without greeting or consuming a qualified quota',async()=>{
+test('missing core evidence is skipped without saving an intermediate candidate or consuming quota',async()=>{
  const out=await fixture(async tools=>{
   await search(tools);await select(tools)
   await tools.openResume()
   const saved=await tools.execute('sourcing_record_candidate',{...tools.identity(),identityRef:'card',resumeRefs:['card'],scope:'online',fields:[],assessments:assessments.map(row=>({...row,state:'unknown',quote:''})),analysis:'缺少证据'})
-  assert.equal(saved.recorded,0);assert.equal(saved.reviewCount,1);assert.equal(saved.needsGreeting,false);assert.equal(tools.opts.isComplete(),false)
+  assert.equal(saved.skipped,true);assert.equal(saved.qualified,false);assert.equal(tools.opts.isComplete(),false)
   await finishExhausted(tools, '平台确认没有更多结果')
  },{autoGreet:true})
- assert.equal(out.job.candidates.length,1);assert.equal(out.job.candidates[0].scoring.needsReview,true);assert.equal(out.job.greetings.length,0);assert.equal(out.calls.includes('greeting_click'),false)
+ assert.equal(out.job.candidates.length,0);assert.equal(out.job.skippedUnverified,1);assert.equal(out.job.greetings.length,0);assert.equal(out.calls.includes('greeting_click'),false)
+ assert.ok(out.job.events.some(row=>/证据不足.*已跳过/.test(row.message)))
+})
+test('an unknown core item does not block greeting when overall evidence and score qualify',async()=>{
+ const out=await fixture(async tools=>{
+  await search(tools);await select(tools);const saved=await record(tools)
+  assert.equal(saved.needsGreeting,true)
+  await greet(tools,saved.candidateKey)
+ },{autoGreet:true,position:{...position,description:'Java 后端开发，支付经验'},criteria:criteria.map((row,index)=>({...row,quote:index?'支付经验':row.quote,tier:'core',must:false,weight:index?30:70}))})
+ assert.equal(out.job.candidates.length,1,out.job.detail)
+ assert.equal(out.job.candidates[0].coverage,70)
+ assert.equal(out.job.candidates[0].scoring.needsReview,false)
+ assert.equal(out.job.greetings[0].stage,'succeeded')
+ assert.equal(out.calls.filter(call=>call==='greeting_click').length,1)
 })
 test('last accepted candidate is greeted before quota completion and actual click is persisted',async()=>{
  const out=await fixture(async tools=>{

@@ -13,6 +13,8 @@
 
 const path = require('path')
 const { spawn } = require('child_process')
+const { notifyExtension } = require('./connection-notification.cjs')
+const { configurationPath } = require('./config.cjs')
 
 const DEFAULT_PORT = 5030
 const DEFAULT_TIMEOUT_MS = 90 * 1000
@@ -71,15 +73,17 @@ const main = async () => {
   }
 
   const started = Date.now()
+  let notified = status ? notifyExtension(configurationPath()) : false
   let lastNote = 0
   for (;;) {
-    await sleep(1000)
+    await sleep(Date.now() - started < 2000 ? 100 : 250)
     const current = await readStatus()
     if (current?.ready) {
       const seconds = ((Date.now() - started) / 1000).toFixed(1)
       say(`扩展已连接（${seconds}s，deviceId=${current.deviceId}，taskId=${current.taskId}）`)
       return 0
     }
+    if (current && !notified) notified = notifyExtension(configurationPath())
     const elapsed = Date.now() - started
     if (elapsed > TIMEOUT_MS) {
       console.error(`等待扩展连接超时（${TIMEOUT_MS / 1000}s）。排查方向：`)
