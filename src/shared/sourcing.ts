@@ -55,7 +55,6 @@ export interface SourcingCandidate {
   listAssessments?: SourcingListAssessment[]
 }
 export interface SourcingJob extends WorkbenchJob {
-  talentCleared?: boolean
   clearedCandidateCount?: number
   kind: 'talent_sourcing'; jobId: string; position?: SourcingPosition; supplement: string
   jobDescription?: string
@@ -64,6 +63,8 @@ export interface SourcingJob extends WorkbenchJob {
   minimumScore?: number; autoGreet?: boolean; greetings?: SourcingGreeting[]; scanned?: number; skippedLowScore?: number; skippedByFilters?: number; skippedUnverified?: number
   platformJobs?: Partial<Record<Platform, { id: string; name: string }[]>>
   candidates: SourcingCandidate[]
+  /** Verified identities read during list screening, including rejected candidates. */
+  viewedCandidates?: Pick<SourcingCandidate, 'key' | 'platform' | 'identityAliases' | 'platformIdentity'>[]
   channels: { platform: Platform; status: 'queued' | 'running' | 'completed' | 'stopped' | 'failed'; detail: string; candidateCount?: number; limit?: number }[]
 }
 
@@ -105,4 +106,4 @@ export type DataGroup = 'tasks' | 'talents'
 export interface DataStorageUsage { tasks: { bytes: number }; talents: { bytes: number } }
 
 export interface SourcingGreeting extends TaskResult { candidateKey: string; platform: Platform; knownContacted?: boolean }
-export interface PositionOverview extends JobOption { candidateCount: number; greetedCount: number; resumeCount: number; importedCount: number; activeKind?: WorkbenchJob['kind'] }
+export interface PositionOverview extends JobOption { viewedCount: number; candidateCount: number; greetedCount: number; resumeCount: number; importedCount: number; activeKind?: WorkbenchJob['kind'] }

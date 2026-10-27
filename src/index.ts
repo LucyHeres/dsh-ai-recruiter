@@ -99,7 +99,7 @@ export function apply(ctx: Context, config: Config) {
         logger.write('info', 'native.registered', { extensionId: host.extensionId })
         const extensionDetector = new ExtensionInstallationDetector()
         const stopConnection = require('../browser-agent-gateway/connection-service.cjs').startConnectionService({
-          canConnect: async () => (await extensionDetector.read(false)).status !== 'not_installed',
+          canConnect: async () => ['installed', 'unknown'].includes((await extensionDetector.read(false)).status),
           onError: (error: unknown) => logger.write('warn', 'browser.autoconnect_failed', logError(error)),
         })
         return () => { stopConnection(); host.dispose(); nativeConnection.registered = false }

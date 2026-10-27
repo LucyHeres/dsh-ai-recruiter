@@ -16,7 +16,7 @@ import { safeError } from './task-error.js'
 import { logError, type DeveloperLog } from './developer-log.js'
 import { detectPlatformLogin, assertPlatformTaskLogin, isPlatformLoginRequired } from './platform-login.js'
 import { ExtensionInstallationDetector } from './extension-installation.js'
-import { EXTENSION_REQUIRED_CODE } from '../shared/connection-status.js'
+import { EXTENSION_REQUIRED_CODE, EXTENSION_UPGRADE_CODE, EXTENSION_VERSION_UNKNOWN_CODE } from '../shared/connection-status.js'
 import type { ResumeImport } from './resume-import.js'
 import type { WorkbenchTaskExecutor } from './task-executor.js'
 import { candidateCommunication, communicationIndex, sourcingResults, taskHistoryPage } from './sourcing-review.js'
@@ -133,6 +133,7 @@ export class Workbench extends TypertRemoteService {
       try {
         const raw = await this.call('browser_status')
         return { ...base, gateway: true, connected: raw.connected === true, authenticated: raw.authenticated === true,
+          extensionVersion: typeof raw.extensionVersion === 'string' ? raw.extensionVersion : undefined,
           ready: raw.connected === true && raw.authenticated === true && raw.ready === true,
           available: raw.available === true, busy: base.busy || raw.busy === true,
           requiresBegin: raw.requiresBegin === true, executionOwner: typeof raw.executionOwner === 'string' ? raw.executionOwner : null,
@@ -160,8 +161,8 @@ export class Workbench extends TypertRemoteService {
   @Remote
   async positionOverview() {
     await this.initialize()
-    const [options, tasks] = await Promise.all([this.loadJobOptions(), this.listJobs(true)])
-    return positionOverview(options, tasks, this.active?.id)
+    const [options, tasks, contacts, resumes] = await Promise.all([this.loadJobOptions(), this.listJobs(true), readCandidateContacts(this.store), receivedResumes(this.store)])
+    return positionOverview(options, tasks, this.active?.id, contacts, resumes)
   }
   @Remote
   async sourcingHistory(request: unknown) {
@@ -332,13 +333,13 @@ export class Workbench extends TypertRemoteService {
     const allJobs = await this.listJobs(true)
     const jobs = allJobs.filter(job => !job.historyCleared).map(job => job.kind === 'talent_sourcing' ? { ...job, candidates: [] } : job)
     const connection = await this.connection()
-    return { features: TASK_FEATURES.map(feature => ({ ...feature, available: this.executors.has(feature.kind) })), connection, extensionInstallation: await this.extensionDetector.read(connection.connected && connection.authenticated), jobs: jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30), activeJobId: this.active?.id ?? null, nativeConnection: this.native(), dailyUsage: dailyUsage(allJobs), dailyLimit: this.greetingConfig.dailyLimit }
+    return { features: TASK_FEATURES.map(feature => ({ ...feature, available: this.executors.has(feature.kind) })), connection, extensionInstallation: await this.extensionDetector.read(connection.connected && connection.authenticated, false, connection.extensionVersion), jobs: jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30), activeJobId: this.active?.id ?? null, nativeConnection: this.native(), dailyUsage: dailyUsage(allJobs), dailyLimit: this.greetingConfig.dailyLimit }
   }
   @Remote
   async checkExtension(request: unknown) {
     z.object({}).strict().parse(request)
     const connection = await this.connection()
-    return this.extensionDetector.read(connection.connected && connection.authenticated, true)
+    return this.extensionDetector.read(connection.connected && connection.authenticated, true, connection.extensionVersion)
   }
   @Remote
   async connect(signal?: AbortSignal) {
@@ -351,19 +352,24 @@ export class Workbench extends TypertRemoteService {
     const deadline = AbortSignal.timeout(timeoutMs)
     const connectionSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
     this.connecting = true
-    try { await this.call('browser_ensure', { timeoutSeconds: ENSURE_TIMEOUT_SECONDS }, connectionSignal) }
+    try {
+      await this.call('browser_ensure', { timeoutSeconds: ENSURE_TIMEOUT_SECONDS }, connectionSignal)
+      await this.assertExtensionInstalled(connectionSignal, true)
+    }
     catch (error) {
       if (!signal?.aborted && (deadline.aborted || /等待扩展连接超时/.test(String(error)))) throw new Error(`BROWSER_CONNECTION_TIMEOUT: 浏览器扩展在 ${ENSURE_TIMEOUT_SECONDS} 秒内未连接成功，请确认浏览器已打开且薪招扩展已启用，再点击“连接浏览器”重试`)
       throw error
     } finally { this.connecting = false }
   }
-  private async assertExtensionInstalled(signal?: AbortSignal) {
+  private async assertExtensionInstalled(signal?: AbortSignal, requireVersion = false) {
     signal?.throwIfAborted()
     const connection = await this.connection()
-    const installation = await this.extensionDetector.read(connection.connected && connection.authenticated, true)
+    const installation = await this.extensionDetector.read(connection.connected && connection.authenticated, true, connection.extensionVersion)
     signal?.throwIfAborted()
     if (this.disposed) throw new Error('插件已卸载')
     if (installation.status === 'not_installed') throw new Error(`${EXTENSION_REQUIRED_CODE}: 尚未安装薪招浏览器扩展，请先安装后再开始任务。`)
+    if (installation.status === 'outdated') throw new Error(`${EXTENSION_UPGRADE_CODE}: ${installation.detail}`)
+    if (installation.status === 'unknown' && (requireVersion || (connection.connected && connection.authenticated))) throw new Error(`${EXTENSION_VERSION_UNKNOWN_CODE}: ${installation.detail}`)
   }
   @Remote
   async pair(signal?: AbortSignal) {

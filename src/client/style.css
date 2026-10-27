@@ -78,7 +78,6 @@
    选择器需覆盖 .air-connection-item.has-detail small 的 color: inherit。 */
 .air-connection-item.has-detail small.air-connection-tag { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 4px; background: var(--air-hover); color: var(--air-muted); font-size: 10px; line-height: 16px; }
 .air-extension-install { text-decoration: none; color: var(--air-accent); }
-.air-extension-recheck { white-space: nowrap; }
 .air-extension-banner { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 20px; padding: 14px 16px; border: 1px solid var(--air-border); border-radius: 8px; background: var(--air-soft); }
 .air-extension-banner > svg { color: var(--air-accent); }
 .air-extension-banner strong { font-size: 13px; font-weight: 600; }
@@ -523,7 +522,7 @@
 .air-browser-trigger { display: inline-flex; align-items: center; gap: 8px; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--air-secondary); font-size: 12px !important; white-space: nowrap; }
 .air-browser-trigger:hover, .air-browser-trigger[aria-expanded="true"] { background: var(--air-soft); }
 .air-browser-trigger .air-connection-status { margin-left: 2px; }
-.air-browser-popover .air-connection-panel { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; display: flex; flex-direction: column; align-items: stretch; gap: 16px; width: 460px; max-width: calc(100cqw - 32px); max-height: calc(100dvh - 140px); overflow: auto; margin: 0; padding: 16px; border-radius: 10px; background: var(--air-surface); box-shadow: 0 8px 28px var(--air-shadow); }
+.air-browser-popover .air-connection-panel { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; display: flex; flex-direction: column; align-items: stretch; gap: 16px; width: 340px; max-width: calc(100cqw - 32px); max-height: calc(100dvh - 140px); overflow: auto; margin: 0; padding: 16px; border-radius: 10px; background: var(--air-surface); box-shadow: 0 8px 28px var(--air-shadow); }
 .air-browser-popover .air-connection-top { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
 .air-browser-popover .air-connection-heading { gap: 7px; }
 .air-browser-popover .air-connection-actions { flex-wrap: wrap; justify-content: flex-start; gap: 8px 12px; width: auto; }
@@ -590,7 +589,7 @@
 .air-hunt-notice { margin: 8px 0; color: var(--air-secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .air-sourcing textarea { display: block; font: inherit; background: var(--air-surface); color: var(--air-ink); border: 1px solid var(--air-border); border-radius: 6px; padding: 10px 12px; margin-top: 8px; width: 100%; resize: vertical; }
 .air-sourcing-settings { display: flex; flex-direction: column; align-self: start; gap: 22px; min-width: 0; border-left: 1px solid var(--air-divider); padding-left: 28px; }
-.air-sourcing-settings-heading, .air-sourcing-setting-row, .air-auto-greet { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.air-sourcing-settings-heading, .air-sourcing-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .air-sourcing-settings-heading { margin-bottom: 2px; }
 .air-sourcing-settings-heading > span { flex: none; }
 .air-sourcing-settings-field { min-width: 0; }
@@ -905,9 +904,11 @@ details.air-sourcing-analysis[open] > summary { margin-bottom: 10px; }
 .air-browser-trigger { background: var(--air-soft); padding: 6px 9px; border-radius: 6px; }
 .air-browser-trigger:hover { background: var(--air-hover); }
 .air-job-page-title { display: flex; gap: 8px; align-items: center; min-width: 0; }
-.air-job-page-title > div { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+.air-job-page-title > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; min-width: 0; }
 .air-job-page-title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .air-job-page-title p { margin: 0; color: var(--air-muted); font-size: 11px; white-space: nowrap; }
+.air-job-page-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.air-job-page-platforms { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; }
 .air-header-actions { flex-shrink: 0; gap: 12px; }
 .air-workbench button:focus-visible, .air-workbench input:focus-visible { outline-offset: 2px; }
 
@@ -1087,13 +1088,6 @@ button.air-contact-tag:disabled { opacity: .65; }
 .air-sourcing-requirement-section > .air-sourcing-caption { margin: 8px 0 0; }
 .air-sourcing-requirement-section > .air-label { margin: 0; font-size: 13px; font-weight: 600; }
 .air-sourcing-requirement-section .air-sourcing-readonly:disabled { background: var(--air-soft); color: var(--air-ink); -webkit-text-fill-color: var(--air-ink); opacity: 1; font-size: 12px; line-height: 1.75; }
-.air-auto-greet { min-height: 30px; margin: 0; cursor: pointer; }
-.air-sourcing-switch { appearance: none; position: relative; flex: 0 0 32px; width: 32px; height: 18px; margin: 0; border: 1px solid var(--air-border); border-radius: 10px; background: var(--air-border); cursor: pointer; }
-.air-sourcing-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
-.air-sourcing-switch:checked { border-color: var(--air-accent); background: var(--air-accent); }
-.air-sourcing-switch:checked::after { transform: translateX(14px); }
-.air-workbench .air-sourcing-switch:focus-visible { outline: 2px solid var(--air-accent); outline-offset: 3px; }
-.air-sourcing-switch:disabled { opacity: .55; cursor: not-allowed; }
 .air-score-threshold { display: grid; gap: 3px; padding-top: 10px; border-top: 1px solid var(--air-divider); font-size: 11px; }
 .air-score-threshold b { font-weight: 500; }.air-score-threshold span { color: var(--air-muted); }
 .air-resume-panel { flex: 1; min-height: 0; overflow: auto; padding: 18px; }

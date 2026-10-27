@@ -17,7 +17,7 @@ test('task history and rounds use the full per-platform target and preserve hist
 
 test('historical and configured executions apply their own thresholds to results and position counts',async()=>{
  const {positionOverview}=await import('../dist/lib/position-overview.js')
- const jobs=[{id:'legacy',score:55},{id:'lower',score:35,minimumScore:30},{id:'higher',score:75,minimumScore:80},{id:'zero',score:0,minimumScore:0}].map((row,i)=>({...row,kind:'talent_sourcing',jobId:'java',createdAt:`2026-10-${10+i}`,updatedAt:'now',status:'completed',limit:10,detail:'',channels:[],supplement:'',candidates:[{...candidate,key:row.id,name:'示例',score:row.score,scope:'online',fields:[],collectedAt:'now'}],results:[]}))
+ const jobs=[{id:'legacy',score:55},{id:'lower',score:35,minimumScore:30},{id:'higher',score:75,minimumScore:80},{id:'zero',score:0,minimumScore:0}].map((row,i)=>({...row,kind:'talent_sourcing',jobId:'java',createdAt:`2026-10-${10+i}`,updatedAt:'now',status:'completed',limit:10,detail:'',channels:[],supplement:'',candidates:[{...candidate,profileUrl:`${url}/${row.id}`,key:row.id,name:'示例',score:row.score,scope:'online',fields:[],collectedAt:'now'}],results:[]}))
  const all=sourcingResults(jobs,'java','all',new Map())
  assert.deepEqual(all.candidates.map(row=>row.key),['zero','lower'])
  assert.equal(all.current.minimumScore,0);assert.equal(all.current.candidateCount,1)

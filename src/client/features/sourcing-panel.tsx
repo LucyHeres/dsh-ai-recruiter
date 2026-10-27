@@ -12,7 +12,7 @@ import { DEFAULT_MINIMUM_SCORE, sourcingMinimumScore, sourcingCriterionScore, so
 import { sourcingPlatformsForChannels } from '../../shared/published-channels.js'
 import { renderPlatformTag } from '../components/platform-tag.js'
 import { defaultSourcingSettings, SOURCING_MAX_LIMIT, withSourcingJobDescription, type SourcingSettings } from '../../shared/sourcing-settings.js'
-import { isExtensionRequired, EXTENSION_MISSING_MESSAGE } from '../../shared/connection-status.js'
+import { isExtensionRequired, extensionNeedsSetup, extensionSetupMessage } from '../../shared/connection-status.js'
 
 type Rpc = <T>(method: string, request?: unknown, signal?: AbortSignal) => Promise<T>
 const stamp = (s: string) => new Date(s).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -64,7 +64,6 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   const [mobileDetail, setMobileDetail] = useState(false)
   const [sort, setSort] = useState('newest')
   const [detailLoading, setDetailLoading] = useState(false)
-  const [autoGreet, setAutoGreet] = useState(true)
   const [progressExpanded, setProgressExpanded] = useState(state?.jobs.some(row => row.id === state.activeJobId && row.kind === 'talent_sourcing' && (row as SourcingJob).jobId === (positionId || jobId)) ?? false)
   const [minimumScore, setMinimumScore] = useState(DEFAULT_MINIMUM_SCORE)
   const [syncingCommunication, setSyncingCommunication] = useState(false)
@@ -137,7 +136,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
       if (abort.signal.aborted) return
       const settings = value.settings ?? defaultSourcingSettings()
       const available = value.publishedChannels ? sourcingPlatformsForChannels(value.publishedChannels) : value.platforms ?? []
-      setPosition(value); setSupplement(settings.supplement); setLimit(settings.limit); setMinimumScore(settings.minimumScore); setAutoGreet(settings.autoGreet)
+      setPosition(value); setSupplement(settings.supplement); setLimit(settings.limit); setMinimumScore(settings.minimumScore)
       setJobDescription(settings.jobDescription)
       setPlatforms(settings.platforms === undefined ? available : settings.platforms.filter(platform => available.includes(platform)))
     })
@@ -203,7 +202,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   const valid = !!effectivePosition && !!(effectivePosition.description.trim() || supplement.trim()) && selectedPlatforms.length > 0 && validLimit && Number.isInteger(minimumScore) && minimumScore >= 0 && minimumScore <= 100
   function changeJob(id: string) {
     setJobId(id); setPosition(undefined); setPlatforms([]); setResults(undefined); setRoundId('all'); setDetailData(undefined); setSupplement(''); setSelectedKey(''); setView('results'); setFilter(emptyFilters); setError(''); setMobileDetail(false)
-    setLimit(20); setMinimumScore(DEFAULT_MINIMUM_SCORE); setAutoGreet(true)
+    setLimit(20); setMinimumScore(DEFAULT_MINIMUM_SCORE)
     setJobDescription(undefined)
   }
   function persistSettings(settings: Partial<SourcingSettings>) {
@@ -229,11 +228,11 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
     }
     wasMobileDetail.current = mobileDetail
   }, [candidate ? selected?.resultKey : undefined, mobileDetail])
-  const extensionRequired = state?.extensionInstallation?.status === 'not_installed'
+  const extensionRequired = extensionNeedsSetup(state?.extensionInstallation)
   function requireExtension() {
     if (!extensionRequired) return false
     if (onRequireExtension) onRequireExtension()
-    else setError(EXTENSION_MISSING_MESSAGE)
+    else setError(extensionSetupMessage(state?.extensionInstallation))
     return true
   }
   async function syncCommunication() {
@@ -325,7 +324,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
     : ''
   const settingsDisabledReason = startDisabledReason || (!(effectivePosition?.description.trim() || supplement.trim()) ? '请先补充职位说明或招聘要求'
     : !selectedPlatforms.length ? '请至少选择一个招聘平台'
-    : !validLimit ? `每个平台目标人数须为 1–${SOURCING_MAX_LIMIT} 的整数`
+    : !validLimit ? `目标打招呼人数须为 1–${SOURCING_MAX_LIMIT} 的整数`
     : !Number.isInteger(minimumScore) || minimumScore < 0 || minimumScore > 100 ? '最低匹配分须为 0–100 的整数' : '')
   function actionButton(settings = false) {
     const disabled = actionDisabled || settings && !currentActive && !extensionRequired && !valid
@@ -339,7 +338,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
     if (currentActive) { void stopSourcing(); return }
     if (requireExtension()) return
     if (!valid) { changeView('requirements'); return }
-    setError(''); onStart({ jobId, platforms: selectedPlatforms, supplement, ...(jobDescription === undefined ? {} : { jobDescription }), limit, minimumScore, autoGreet, confirmed: true }); setView('results')
+    setError(''); onStart({ jobId, platforms: selectedPlatforms, supplement, ...(jobDescription === undefined ? {} : { jobDescription }), limit, minimumScore, autoGreet: true, confirmed: true }); setView('results')
   }
   const hasFilters = executionId === undefined && roundId !== 'all' || Object.values(filter).some(value => value !== 'all')
   const activeFilterCount = Object.values(filter).filter(value => value && value !== 'all').length
@@ -386,7 +385,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
             </div>
           </details>
         </div>
-</> : <div className="air-hunt-idle"><span>{selectedPlatforms.map(platform => PLATFORMS[platform].label).join(' / ') || (positionLoading ? '正在读取职位发布渠道…' : availablePlatforms.length ? '请选择本轮寻聘平台' : positionChannels?.length ? '当前发布渠道暂不支持自动寻聘' : '当前职位暂无可寻聘的发布渠道')}</span><span>每个平台 {limit} 人 · 共 {limit * selectedPlatforms.length} 人</span><span>最低匹配度 {Number.isInteger(minimumScore) ? `${minimumScore} 分` : '未设置'}</span><span>{autoGreet ? '自动打招呼已开启' : '自动打招呼未开启'}</span></div>}</div>}
+</> : <div className="air-hunt-idle"><span>{selectedPlatforms.map(platform => PLATFORMS[platform].label).join(' / ') || (positionLoading ? '正在读取职位发布渠道…' : availablePlatforms.length ? '请选择本轮寻聘平台' : positionChannels?.length ? '当前发布渠道暂不支持自动寻聘' : '当前职位暂无可寻聘的发布渠道')}</span><span>每个平台 {limit} 人 · 共 {limit * selectedPlatforms.length} 人</span><span>最低匹配度 {Number.isInteger(minimumScore) ? `${minimumScore} 分` : '未设置'}</span><span>自动打招呼已开启</span></div>}</div>}
     </section>
     {error && <div className="air-alert" role="alert">{error}<button type="button" className="air-text-button" onClick={() => setError('')}>关闭</button></div>}
     {pending && <div className="air-pending"><p>任务启动结果暂未确认，请刷新任务状态后再操作。</p><button type="button" className="air-text-button" disabled={!!busy} onClick={onReconcile}>刷新任务状态</button></div>}
@@ -497,16 +496,12 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
           {!availablePlatforms.length && <p className="air-sourcing-caption">{positionLoading ? '正在读取当前职位的发布渠道…' : positionChannels?.length ? '当前发布渠道暂不支持自动寻聘，目前支持猎聘和 BOSS 直聘。' : positionChannels ? '当前职位暂无发布渠道，请先在薪人薪事设置后刷新。' : '发布渠道信息尚未读取，请完全退出并重开薪灵后刷新。'}</p>}
         </fieldset>
         <div className="air-sourcing-settings-field">
-          <div className="air-sourcing-setting-row"><label className="air-label" htmlFor="air-sourcing-limit">每个平台目标人数</label><div className={`air-number-field${validLimit ? '' : ' is-invalid'}`}><input id="air-sourcing-limit" type="number" min={1} max={SOURCING_MAX_LIMIT} step={1} disabled={locked || positionLoading || position?.id !== jobId} value={Number.isNaN(limit) ? '' : limit} aria-invalid={!validLimit} aria-describedby="air-sourcing-limit-help" onChange={e => { const next = e.target.value ? Number(e.target.value) : NaN; setLimit(next); if (Number.isInteger(next) && next >= 1 && next <= SOURCING_MAX_LIMIT) persistSettings({ limit: next }) }} /><span>人</span></div></div>
-          <p id="air-sourcing-limit-help" className={`air-sourcing-caption${validLimit ? '' : ' is-invalid'}`}>{validLimit ? `每个平台单轮最多 ${SOURCING_MAX_LIMIT} 人，超量可能触发账号封控。` : `请输入 1–${SOURCING_MAX_LIMIT} 之间的整数。`}</p>
+          <div className="air-sourcing-setting-row"><label className="air-label" htmlFor="air-sourcing-limit">目标打招呼人数</label><div className={`air-number-field${validLimit ? '' : ' is-invalid'}`}><input id="air-sourcing-limit" type="number" min={1} max={SOURCING_MAX_LIMIT} step={1} disabled={locked || positionLoading || position?.id !== jobId} value={Number.isNaN(limit) ? '' : limit} aria-invalid={!validLimit} aria-describedby="air-sourcing-limit-help" onChange={e => { const next = e.target.value ? Number(e.target.value) : NaN; setLimit(next); if (Number.isInteger(next) && next >= 1 && next <= SOURCING_MAX_LIMIT) persistSettings({ limit: next }) }} /><span>人</span></div></div>
+          <p id="air-sourcing-limit-help" className={`air-sourcing-caption${validLimit ? '' : ' is-invalid'}`}>{validLimit ? `每个平台分别计算，单轮最多 ${SOURCING_MAX_LIMIT} 人，超量可能触发账号封控。达标后自动打招呼，已沟通的不重复发送。` : `请输入 1–${SOURCING_MAX_LIMIT} 之间的整数。`}</p>
         </div>
         <div className="air-sourcing-settings-field">
           <div className="air-sourcing-setting-row"><label className="air-label" htmlFor="air-sourcing-minimum-score">最低匹配分</label><div className="air-number-field"><input id="air-sourcing-minimum-score" type="number" min={0} max={100} step={1} disabled={locked || positionLoading || position?.id !== jobId} value={Number.isNaN(minimumScore) ? '' : minimumScore} aria-describedby="air-sourcing-minimum-score-help" onChange={e => { const next = e.target.value === '' ? NaN : Number(e.target.value); setMinimumScore(next); if (Number.isInteger(next) && next >= 0 && next <= 100) persistSettings({ minimumScore: next }) }} /><span>分</span></div></div>
           <p id="air-sourcing-minimum-score-help" className="air-sourcing-caption">百分制（0–100 分），仅保留达到此分数的人选。</p>
-        </div>
-        <div className="air-sourcing-settings-field">
-          <label className="air-auto-greet" htmlFor="air-sourcing-auto-greet"><span className="air-label">自动打招呼</span><input id="air-sourcing-auto-greet" className="air-sourcing-switch" type="checkbox" role="switch" checked={autoGreet} disabled={locked || positionLoading || position?.id !== jobId} aria-describedby="air-sourcing-auto-greet-help" onChange={e => { setAutoGreet(e.target.checked); persistSettings({ autoGreet: e.target.checked }) }} /></label>
-          <p id="air-sourcing-auto-greet-help" className="air-sourcing-caption">{autoGreet ? '达标后发送默认招呼，已沟通的不重复发送。' : '仅筛选人才，不发送招呼。'}</p>
         </div>
         <footer className="air-sourcing-settings-actions">{actionButton(true)}</footer>
       </div>

@@ -27,11 +27,13 @@ export type Platform = keyof typeof PLATFORMS
 export const PLATFORM_KEYS = Object.keys(PLATFORMS) as [Platform, ...Platform[]]
 // Temporary local test package; replace with the production download before release.
 export const EXTENSION_INSTALL_URL = 'https://xinrenxinshi.oss-cn-beijing.aliyuncs.com/xinzhao/xinzhao_%E6%9C%AC%E5%9C%B0%E6%B5%8B%E8%AF%95%E7%89%88_v3.2.46.zip'
+export const MINIMUM_EXTENSION_VERSION = '3.2.46'
 /** 首次唤起 Chrome 扩展实测约 40s，留出余量避免过早报超时。 */
 // The extension's local probe may back off for 60s before starting its handshake.
 export const ENSURE_TIMEOUT_SECONDS = 90
 export interface ExtensionInstallation {
-  status: 'installed' | 'not_installed' | 'unknown'
+  status: 'installed' | 'not_installed' | 'outdated' | 'unknown'
+  version?: string
   detail: string
   source: 'connection' | 'browser_profile'
   checkedAt: string
@@ -40,6 +42,7 @@ export interface ConnectionState {
   gateway: boolean
   connected: boolean
   authenticated: boolean
+  extensionVersion?: string
   ready: boolean
   available: boolean
   busy: boolean
@@ -72,6 +75,8 @@ export interface TaskResult {
 export interface WorkbenchJob {
   /** Display history was cleared; minimal execution receipts may remain. */
   historyCleared?: boolean
+  /** Talent data was cleared; retained write receipts are excluded from live metrics. */
+  talentCleared?: boolean
   kind: TaskKind
   id: string
   platform: Platform

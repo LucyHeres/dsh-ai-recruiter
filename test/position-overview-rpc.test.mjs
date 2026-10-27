@@ -14,7 +14,7 @@ function moduleOf(entry, react) {
 }
 
 test('position cards show only the five recruitment platforms, all inline without collapsing after three',()=>{
- const metrics={candidateCount:0,greetedCount:0,resumeCount:0,importedCount:0}
+ const metrics={viewedCount:0,candidateCount:0,greetedCount:0,resumeCount:0,importedCount:0}
  const state=[[{...metrics,id:'internal',name:'部门职位',platforms:[],publishedChannels:[{id:'20',name:'内部推荐'},{id:'21',name:'招聘门户'},{id:'34',name:'猎头'}]},{...metrics,id:'java',name:'Java',platforms:['liepin'],publishedChannels:[{id:'4',name:'猎聘'}]},{...metrics,id:'sales',name:'销售',platforms:['boss'],publishedChannels:[{id:'11',name:'BOSS直聘'}]},{...metrics,id:'all',name:'全平台职位',publishedChannels:[{id:'1',name:'拉勾'},{id:'11',name:'BOSS'},{id:'2',name:'智联'},{id:'3',name:'51job'},{id:'4',name:'猎聘'},{id:'34',name:'猎头'},{id:'10',name:'脉脉'}]},{...metrics,id:'none',name:'未发布',platforms:[],publishedChannels:[]}],false,'','',0]
  let index=0
  const react={...require('react'),useEffect(){},useState:()=>[state[index++],()=>{}]}
@@ -27,7 +27,7 @@ test('position cards show only the five recruitment platforms, all inline withou
  const tags=nodes(cards[3]).filter(node=>node?.props?.className?.includes('air-position-platform-tag'))
  assert.equal(tags.length,5);assert.ok(tags.every(node=>node.type==='span'))
  assert.equal(nodes(cards[3]).filter(node=>node?.type==='button').length,1,'the only card button is the recruit action')
- assert.deepEqual(nodes(cards[3]).filter(node=>node?.type==='dt').flatMap(node=>nodes(node.props.children)),['达标人才','已打招呼','入库简历'])
+ assert.deepEqual(nodes(cards[3]).filter(node=>node?.type==='dt').flatMap(node=>nodes(node.props.children)),['已浏览','已沟通','已有简历'])
  assert.ok(!nodes(tree).includes('在线简历'))
 })
 
@@ -40,6 +40,7 @@ test('position homepage uses the real RPC envelope with empty args for its no-ar
   service.initialize=async()=>{}
   service.loadJobOptions=async()=>[{id:'job',name:'Java 工程师',platforms:['liepin'],publishedChannels:[{id:'4',name:'猎聘'},{id:'34',name:'猎头'}]}]
   service.listJobs=async()=>[]
+  service.store={find:async()=>null}
   assert.equal(Workbench.prototype.positionOverview.length,0)
   const client=moduleOf('src/client/index.tsx',react)
   client.apply({effect:()=>{},get:()=>({rpc:{call:async(path,endpoint,payload,signal)=>{

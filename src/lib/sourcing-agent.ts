@@ -33,7 +33,7 @@ export class SourcingAgent {
     const input = sourcingStartSpec.parse(request)
     return { kind: this.kind, id: input.id, jobId: input.jobId, platform: input.platforms[0], platforms: input.platforms,
       ...(input.jobDescription === undefined ? {} : { jobDescription: input.jobDescription }),
-      supplement: input.supplement, sourceMode: input.sourceMode, limit: input.limit, limitScope: 'per_platform', minimumScore: input.minimumScore, autoGreet: input.autoGreet, greetings: [], scanned: 0, skippedLowScore: 0, candidates: [], channels: input.platforms.map(platform => ({ platform, status: 'queued', detail: '尚未开始', candidateCount: 0, limit: input.limit })),
+      supplement: input.supplement, sourceMode: input.sourceMode, limit: input.limit, limitScope: 'per_platform', minimumScore: input.minimumScore, autoGreet: input.autoGreet, greetings: [], scanned: 0, skippedLowScore: 0, candidates: [], viewedCandidates: [], channels: input.platforms.map(platform => ({ platform, status: 'queued', detail: '尚未开始', candidateCount: 0, limit: input.limit })),
       status: 'queued', detail: '正在读取职位要求', results: [], events: [], createdAt: now(), updatedAt: now() }
   }
   async prepare(job: SourcingJob, signal: AbortSignal) {

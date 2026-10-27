@@ -370,6 +370,7 @@ test('verified return from resume renews search proof across a document identity
   const f = await runFixture({ twoCandidates: true, renewDocument: true })
   assert.equal(f.job.status, 'completed', f.job.detail)
   assert.equal(f.job.candidates.length, 2)
+  assert.equal(f.job.viewedCandidates.length, 2, 'list previews, detail reads and ref renewal retain one identity per person')
   assert.equal(f.fallbackCalls, 0)
   assert.equal(f.batches, 3)
   assert.deepEqual(f.job.candidates.map(p => p.name).sort(), ['李明', '陈先生'].sort())

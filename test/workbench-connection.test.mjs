@@ -3,9 +3,10 @@ import { test } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { Workbench } from '../dist/lib/workbench.js'
 import { SourcingAgent } from '../dist/lib/sourcing-agent.js'
+import { ExtensionInstallationDetector } from '../dist/lib/extension-installation.js'
 import { ENSURE_TIMEOUT_SECONDS } from '../dist/shared/workbench.js'
 
-function fixture(ensure) {
+function fixture(ensure, version = '3.2.46') {
   const service = Object.create(Workbench.prototype), calls = []
   let ready = false
   Object.assign(service, { active: null, operation: false, disposed: false, connecting: false })
@@ -13,7 +14,7 @@ function fixture(ensure) {
   service.call = async (tool, args, signal) => {
     calls.push({ tool, args, signal })
     if (tool === 'browser_ensure') { await ensure(signal); ready = true; return {} }
-    if (tool === 'browser_status') return { connected: ready, authenticated: ready, ready, available: ready }
+    if (tool === 'browser_status') return { connected: ready, authenticated: ready, ready, available: ready, extensionVersion: version }
     if (tool === 'browser_begin') return {}
     throw new Error(`Unexpected tool ${tool}`)
   }
@@ -168,9 +169,39 @@ test('missing installation never saves or runs a task; installation requires a f
 
 test('unreadable installation metadata does not block a real connection attempt', async () => {
   const { service, calls } = fixture(async () => {})
-  service.extensionDetector = { read: async () => ({ status: 'unknown' }) }
+  service.extensionDetector = new ExtensionInstallationDetector([])
   await service.connect()
   assert.ok(calls.some(call => call.tool === 'browser_ensure'))
+})
+
+test('outdated installation rejects connect, pairing and browser tasks before waking the extension', async () => {
+  for (const action of ['begin', 'connect', 'pair']) {
+    const { service, calls } = fixture(() => { throw Error('must not connect') })
+    service.extensionDetector = { read: async () => ({ status: 'outdated', version: '3.2.45', detail: '请升级至 3.2.46 或更高版本' }) }
+    await assert.rejects(service[action](), /BROWSER_EXTENSION_OUTDATED.*3\.2\.46/)
+    assert.equal(service.connecting, false); assert.equal(service.operation, false)
+    assert.deepEqual(calls.map(call => call.tool), ['browser_status'])
+  }
+})
+
+test('connection validates the reported version before acquiring browser execution', async () => {
+  for (const [version, code] of [['3.2.45', 'BROWSER_EXTENSION_OUTDATED'], [undefined, 'BROWSER_EXTENSION_VERSION_UNKNOWN']]) {
+    const { service, calls } = fixture(async () => {}, version ?? null)
+    service.extensionDetector = new ExtensionInstallationDetector([])
+    await assert.rejects(service.begin(), new RegExp(code))
+    assert.equal(service.connecting, false)
+    assert.ok(calls.some(call => call.tool === 'browser_ensure'))
+    assert.equal(calls.some(call => call.tool === 'browser_begin'), false)
+  }
+})
+
+test('an already connected old extension cannot bypass the version requirement', async () => {
+  const { service, calls } = fixture(() => { throw Error('must not ensure') })
+  service.extensionDetector = new ExtensionInstallationDetector([])
+  service.connection = async () => ({ connected: true, authenticated: true, ready: true, extensionVersion: '3.2.45' })
+  await assert.rejects(service.connect(), /BROWSER_EXTENSION_OUTDATED/)
+  assert.equal(calls.length, 0)
+  assert.equal(service.operation, false)
 })
 
 test('resume sync also rejects missing installation and releases its reservation without connecting', async () => {

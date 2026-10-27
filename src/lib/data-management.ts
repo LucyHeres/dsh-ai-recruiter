@@ -13,12 +13,13 @@ const safeResults = <T extends TaskResult>(rows: T[]) => rows.map(({ name: _name
 export function withoutTaskHistory(job: WorkbenchJob): WorkbenchJob {
   const receipt: WorkbenchJob = { id: job.id, kind: job.kind, platform: job.platform, jobId: job.jobId,
     limit: job.limit, status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt,
-    detail: '', results: safeResults(job.results ?? []), historyCleared: true }
+    detail: '', results: safeResults(job.results ?? []), historyCleared: true, talentCleared: job.talentCleared }
   if (job.kind !== 'talent_sourcing') return receipt
   const source = job as SourcingJob
   return { ...receipt, platforms: source.platforms, candidates: source.candidates ?? [], channels: [],
     position: source.position, supplement: source.supplement, jobDescription: source.jobDescription,
     requirements: source.requirements, requirementVersion: source.requirementVersion, minimumScore: source.minimumScore,
+    viewedCandidates: source.viewedCandidates, scanned: source.scanned,
     limitScope: source.limitScope, sourceMode: source.sourceMode, greetings: safeResults(source.greetings ?? []),
     talentCleared: source.talentCleared, clearedCandidateCount: source.clearedCandidateCount } as SourcingJob
 }
@@ -28,7 +29,7 @@ export function withoutTalents(job: SourcingJob): SourcingJob {
     fetchedAt: job.position.fetchedAt, description: '',
   }
   const { requirements: _requirements, requirementVersion: _version, jobDescription: _description,
-    platformJobs: _platformJobs, searchFilters: _filters, ...rest } = job
+    platformJobs: _platformJobs, searchFilters: _filters, viewedCandidates: _viewed, ...rest } = job
   return { ...rest, candidates: [], position, supplement: '', talentCleared: true,
     clearedCandidateCount: job.talentCleared ? job.clearedCandidateCount : sourcingQualifiedCount(job) }
 }
@@ -84,7 +85,10 @@ export async function clearData(store: Store, group: DataGroup, clearLogs: () =>
     for (const { id, job } of entries) if (!job.historyCleared) await store.put(id, withoutTaskHistory(job))
     await clearLogs()
   } else {
-    for (const { id, job } of entries) if (job.kind === 'talent_sourcing' && !(job as SourcingJob).talentCleared) await store.put(id, withoutTalents(job as SourcingJob))
+    for (const { id, job } of entries) {
+      if (job.kind === 'talent_sourcing' && !job.talentCleared) await store.put(id, withoutTalents(job as SourcingJob))
+      else if (job.kind === 'greeting' && !job.talentCleared) await store.put(id, { ...job, talentCleared: true })
+    }
     await clearReceivedResumeCache(store)
     await clearReceivedResumeRecords(store)
     for (const file of await files(store, 'criteria-')) await rm(store.path(file.id))

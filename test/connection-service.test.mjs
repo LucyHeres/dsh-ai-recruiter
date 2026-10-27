@@ -56,7 +56,7 @@ process.send({ event: 'started' })
   await until(() => messages.find(message => message.event === 'started'))
   return { app, config, profile, status, pids, messages, sockets }
 }
-async function extension(f) {
+async function extension(f, version = '3.2.46') {
   const socket = new WebSocket(f.profile.gatewayUrl), events = []
   f.sockets.push(socket)
   socket.addEventListener('error', () => {})
@@ -69,11 +69,23 @@ async function extension(f) {
     socket.addEventListener('error', reject, { once: true })
   })
   socket.send(JSON.stringify({ deviceId: f.profile.deviceId, deviceToken: f.profile.deviceToken,
-    protocolVersion: '1.0', extensionFeatures: ['local.task.lifecycle'] }))
+    protocolVersion: '1.0', extensionVersion: version, extensionFeatures: ['local.task.lifecycle'] }))
   await until(async () => (await f.status())?.ready)
   assert.deepEqual(events, ['agent.authenticated', 'task.claim.ack'])
   return socket
 }
+
+test('gateway status exposes the authenticated version and clears it on disconnect', async t => {
+  const f = await fixture(t)
+  await until(f.status)
+  for (const version of ['3.2.45', '3.2.46', null]) {
+    const socket = await extension(f, version)
+    assert.equal((await f.status()).extensionVersion, version)
+    socket.close()
+    await until(async () => !(await f.status())?.connected)
+    assert.equal((await f.status()).extensionVersion, null)
+  }
+})
 
 test('startup skips gateway and wake-up while the extension is missing, then connects after installation', async t => {
   const f = await fixture(t, { installed: false })

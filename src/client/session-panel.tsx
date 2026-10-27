@@ -134,7 +134,7 @@ export function SessionRecruitmentPanel({ sessionId, rpc, openWorkbench }: Props
     finally { actionLock.current = false; if (mounted.current) setBusy('') }
   }
   function start(settings: Record<string, unknown>) {
-    if (setup.missing) { setup.show(); return }
+    if (setup.required) { setup.show(); return }
     void perform('启动任务', async () => {
       const request = { sessionId, task: { ...settings, kind: 'talent_sourcing', id: crypto.randomUUID() } }
       pending.current = request

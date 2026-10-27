@@ -13,9 +13,9 @@ const rounds = [{...current,number:2},{...current,id:'old',number:1,candidateCou
 const summaries = people.map((person,i)=>({...person,roundId:i?'new':'old',roundNumber:i?2:1,roundCreatedAt:current.createdAt,resultKey:`${i?'new':'old'}:${person.key}`}))
 const results = {jobId:'java',roundId:'all',rounds,current,candidates:summaries}
 const details = (i) => ({jobId:'java',roundId:i?'new':'old',candidate:people[i],requirements:{criteria:[{id:'java',label:i?'新轮要求':'旧轮要求',must:true,quote:i?'新的要求':'旧的要求',weight:100}]}})
-const indexes = {jobId:2,position:3,positionLoading:4,supplement:5,platforms:6,limit:7,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,autoGreet:22,expanded:23,minimumScore:24,syncing:25,communicationNotice:26,jobDescription:29}
+const indexes = {jobId:2,position:3,positionLoading:4,supplement:5,platforms:6,limit:7,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,expanded:22,minimumScore:23,syncing:24,communicationNotice:25,jobDescription:28}
 function fixture(overrides={}, locked=true, compact=false, options={}) {
-  const states=[[],false,'java',position,false,'',['liepin'],10,results,'all',details(1),'results','',{score:'all',communication:'all',platform:'all'},'analysis','',0,false,false,false,'score-desc',false,undefined,true]
+  const states=[[],false,'java',position,false,'',['liepin'],10,results,'all',details(1),'results','',{score:'all',communication:'all',platform:'all'},'analysis','',0,false,false,false,'score-desc',false,true]
   Object.entries(overrides).forEach(([name,value])=>states[indexes[name]]=value)
   const refs=[],starts=[],requests=[];let index=0,refIndex=0,effects=[]
   const react={...require('react'),useState:initial=>{const i=index++;if(states[i]===undefined)states[i]=typeof initial==='function'?initial():initial;return [states[i],v=>{states[i]=typeof v==='function'?v(states[i]):v}]},useRef:value=>{const i=refIndex++;return refs[i]??={current:value}},useEffect:(effect,deps)=>effects.push({effect,deps})}
@@ -30,18 +30,20 @@ const find=(tree,predicate)=>elements(tree).find(row=>row?.props&&predicate(row)
 const button=(tree,label)=>find(tree,row=>row.type==='button'&&(text(row)===label||row.props['aria-label']===label))
 const cards=tree=>elements(tree).filter(row=>row?.props?.className?.startsWith('air-sourcing-person '))
 
-test('sync opens installation guidance without making a request when the extension is missing',async()=>{
+test('sync opens setup without making a request when the extension is missing or outdated',async()=>{
+ for(const status of ['not_installed','outdated']){
  let prompts=0
- const view=fixture({},false,false,{state:{jobs:[],extensionInstallation:{status:'not_installed'}},onRequireExtension:()=>prompts++})
+ const view=fixture({},false,false,{state:{jobs:[],extensionInstallation:{status}},onRequireExtension:()=>prompts++})
  button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
  assert.equal(prompts,1);assert.equal(view.requests.length,0);assert.equal(view.get('syncing'),false)
+ }
 })
 
 test('both sourcing buttons explain missing installation before validating settings in either layout',()=>{
- for(const compact of [false,true])for(const settings of [false,true]){
+ for(const status of ['not_installed','outdated'])for(const compact of [false,true])for(const settings of [false,true]){
   let prompts=0
   const view=fixture({view:settings?'requirements':'results',platforms:[],limit:0},false,compact,{
-   state:{jobs:[],extensionInstallation:{status:'not_installed'}},onRequireExtension:()=>prompts++})
+   state:{jobs:[],extensionInstallation:{status}},onRequireExtension:()=>prompts++})
   const tree=view.render(),scope=settings?find(tree,row=>row.props.title==='寻聘设置'):tree
   const start=button(scope,'开始寻聘')
   assert.equal(start.props.disabled,false,'installation guidance must be reachable even with unfinished settings')
@@ -78,18 +80,19 @@ test('edits restore per position after leaving the panel without starting a task
   const view=fixture({view:'requirements'},false,false,options)
   await load(view)
   assert.equal(view.get('limit'),2);assert.equal(view.get('minimumScore'),6)
-  assert.equal(view.get('autoGreet'),false);assert.equal(view.get('supplement'),'软件销售经验优先')
+  assert.equal(find(view.render(),row=>row.props.id==='air-sourcing-auto-greet'),undefined);assert.equal(view.get('supplement'),'软件销售经验优先')
+  button(view.render(),'开始寻聘').props.onClick();assert.equal(view.starts.at(-1).autoGreet,true)
+  view.starts.length=0;view.set('view','requirements')
   assert.deepEqual(Array.from(view.get('platforms')),['boss'])
   const input=(id,value)=>find(view.render(),row=>row.props.id===id).props.onChange({target:{value}})
   input('air-sourcing-limit','7');input('air-sourcing-minimum-score','0');input('air-sourcing-supplement','')
   input('air-sourcing-job-description','负责新的 Java 核心模块\n熟悉 SQL')
-  find(find(view.render(),row=>row.props.className==='air-auto-greet'),row=>row.type==='input').props.onChange({target:{checked:true}})
   find(find(view.render(),row=>row.type==='fieldset'),row=>row.type==='input'&&row.props.checked).props.onChange({target:{checked:false}})
   await drain();assert.equal(view.starts.length,0)
   const remounted=fixture({view:'requirements',position:undefined},false,true,options)
   await load(remounted)
   assert.equal(remounted.get('limit'),7);assert.equal(remounted.get('minimumScore'),0)
-  assert.equal(remounted.get('autoGreet'),true);assert.equal(remounted.get('supplement'),'')
+  assert.equal(remounted.get('supplement'),'')
   assert.equal(find(remounted.render(),row=>row.props.id==='air-sourcing-job-description').props.value,'负责新的 Java 核心模块\n熟悉 SQL')
   assert.deepEqual(Array.from(remounted.get('platforms')),[],'an intentionally empty platform selection survives re-entry')
   const switchTo=async id=>{
@@ -122,7 +125,7 @@ test('transient invalid numbers do not overwrite settings and persistence failur
  assert.match(text(view.render()),/寻聘设置保存失败.*磁盘不可写/)
  const loading=fixture({view:'requirements',positionLoading:true},false,false,{state:{jobs:[]}}).render()
  for(const id of ['air-sourcing-limit','air-sourcing-minimum-score','air-sourcing-supplement','air-sourcing-job-description'])assert.equal(find(loading,row=>row.props.id===id).props.disabled,true)
- assert.equal(find(find(loading,row=>row.props.className==='air-auto-greet'),row=>row.type==='input').props.disabled,true)
+ assert.equal(find(loading,row=>row.props.id==='air-sourcing-auto-greet'),undefined)
 })
 
 test('editable job descriptions are saved and submitted without changing the read-only fixed conditions',()=>{
@@ -155,7 +158,8 @@ test('a late position-settings response cannot replace the next selected positio
  finish({...position,settings:{limit:50,minimumScore:0,supplement:'旧职位',autoGreet:true}})
  await new Promise(resolve=>setImmediate(resolve))
  assert.equal(view.get('jobId'),'sales');assert.equal(view.get('position').id,'sales')
- assert.equal(view.get('limit'),4);assert.equal(view.get('minimumScore'),80);assert.equal(view.get('autoGreet'),false)
+ assert.equal(view.get('limit'),4);assert.equal(view.get('minimumScore'),80)
+ button(view.render(),'开始寻聘').props.onClick();assert.equal(view.starts.at(-1).autoGreet,true)
  assert.equal(view.get('supplement'),'另一个职位')
 })
 
@@ -212,7 +216,7 @@ test('new progress totals sum independent platform targets and keep per-channel 
  const channels=find(tree,row=>row.props.className==='air-sourcing-channel-status')
  assert.match(text(channels),/5 \/ 5/);assert.match(text(channels),/1 \/ 5/)
  const settings=fixture({view:'requirements'},false,false,{state:{jobs:[]}})
- assert.match(text(settings.render()),/每个平台目标人数/)
+ assert.match(text(settings.render()),/目标打招呼人数/)
 })
 test('settings remains visible and readable while execution is locked, with duplicate starts disabled',()=>{
  const view=fixture();const tree=view.render();const settings=button(tree,'寻聘设置')
@@ -350,15 +354,16 @@ test('progress collapse preserves settings and the current task action; low scor
  assert.equal(cards(collapsed).length,2)
 })
 
-test('workbench greeting defaults on and an explicit opt-out is sent unchanged when starting',()=>{
- const view=fixture({view:'requirements'},false,false,{state:{jobs:[]}})
- const setting=find(view.render(),row=>row.props.className==='air-auto-greet')
- const checkbox=find(setting,row=>row.type==='input')
- assert.equal(checkbox.props.role,'switch')
- assert.equal(checkbox.props.checked,true)
- checkbox.props.onChange({target:{checked:false}})
- button(view.render(),'开始寻聘').props.onClick()
- assert.equal(view.starts[0].autoGreet,false)
+test('workbench always enables greetings and settings expose the greeting target without a switch in both layouts',()=>{
+ for(const compact of [false,true]){
+  const view=fixture({view:'requirements'},false,compact,{state:{jobs:[]}})
+  const tree=view.render()
+  assert.equal(find(tree,row=>row.props.role==='switch'),undefined)
+  assert.equal(find(tree,row=>row.props.htmlFor==='air-sourcing-limit').props.children,'目标打招呼人数')
+  assert.match(text(find(tree,row=>row.props.id==='air-sourcing-limit-help')),/每个平台分别计算/)
+  button(tree,'开始寻聘').props.onClick()
+  assert.equal(view.starts[0].autoGreet,true)
+ }
  const enabled=fixture({},false,false,{state:{jobs:[]}});button(enabled.render(),'开始寻聘').props.onClick()
  assert.equal(enabled.starts[0].autoGreet,true)
 })
@@ -390,7 +395,7 @@ test('per-platform targets accept 100 in both layouts and reject values outside 
 test('settings accept a minimum score and candidate lists retain results accepted under each execution threshold',()=>{
  const view=fixture({view:'requirements'},false,false,{state:{jobs:[]}})
  const input=()=>find(view.render(),row=>row.props.id==='air-sourcing-minimum-score')
- assert.equal(input().props.value,60)
+ assert.equal(input().props.value,80)
  assert.match(text(find(view.render(),row=>row.props.id==='air-sourcing-minimum-score-help')),/百分制（0–100 分）/)
  input().props.onChange({target:{value:'30'}});button(view.render(),'开始寻聘').props.onClick()
  assert.equal(view.starts[0].minimumScore,30)

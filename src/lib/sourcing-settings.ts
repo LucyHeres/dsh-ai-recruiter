@@ -22,7 +22,7 @@ async function readSavedSettings(store: Store, jobId: string): Promise<SourcingS
   const record = await store.find<SettingsRecord>(recordKey(jobId))
   if (record) {
     if (record.jobId !== jobId) throw new Error('寻聘设置与当前职位不一致')
-    return { ...defaultSourcingSettings(), ...sourcingSettingsPatchSpec.parse(record.settings) }
+    return { ...defaultSourcingSettings(), ...sourcingSettingsPatchSpec.parse(record.settings), autoGreet: true }
   }
   const latest = (await store.list<SourcingJob>('sourcing-'))
     .filter(job => job.kind === 'talent_sourcing' && job.jobId === jobId)
@@ -32,7 +32,7 @@ async function readSavedSettings(store: Store, jobId: string): Promise<SourcingS
     const parsed = sourcingSettingsPatchSpec.shape[field].safeParse(latest[field])
     if (parsed.success && parsed.data !== undefined) Object.assign(settings, { [field]: parsed.data })
   }
-  return settings
+  return { ...settings, autoGreet: true }
 }
 
 export async function readSourcingSettings(store: Store, jobId: string) {
@@ -47,7 +47,7 @@ export async function saveSourcingSettings(store: Store, jobId: string, input: u
   const patch = Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined))
   const key = queueKey(store, jobId)
   const pending = (writes.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => {
-    const settings = { ...await readSavedSettings(store, jobId), ...patch }
+    const settings = { ...await readSavedSettings(store, jobId), ...patch, autoGreet: true }
     await store.put(recordKey(jobId), { jobId, settings, updatedAt: new Date().toISOString() } satisfies SettingsRecord)
     return settings
   })

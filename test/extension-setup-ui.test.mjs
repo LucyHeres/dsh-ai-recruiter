@@ -13,7 +13,7 @@ const sourcing = tree => find(tree, node => typeof node.props.onReconcile === 'f
 const tick = () => new Promise(resolve => setImmediate(resolve))
 
 function fixture(status = 'not_installed', responder) {
-  const snapshot = { jobs: [], activeJobId: null, extensionInstallation: { status, detail: '未检测到薪招扩展', checkedAt: '', source: 'browser_profile' },
+  const snapshot = { jobs: [], activeJobId: null, extensionInstallation: { status, version: status === 'outdated' ? '3.2.45' : undefined, detail: status === 'outdated' ? '当前薪招扩展版本为 3.2.45，请升级至 3.2.46 或更高版本。' : '未检测到薪招扩展', checkedAt: '', source: 'browser_profile' },
     connection: { ready: false, gateway: true, connected: false, connecting: true, busy: false } }
   const states = [snapshot, 'talent_sourcing', Date.now(), '', '', '', {}, '', false, undefined, { id: 'java', name: 'Java' }, false]
   const refs = [], requests = []; let index = 0, refIndex = 0, effects = [], Page
@@ -81,4 +81,61 @@ test('an uninstall detected by the server clears the rejected start instead of r
   assert.ok(guide(view.render()))
   assert.equal(sourcing(view.render()).props.pending, false)
   assert.deepEqual(view.requests.map(row => row.method), ['start', 'checkExtension'])
+})
+
+test('outdated extension prompts an upgrade and cannot connect or start until a supported version is detected', async () => {
+  const view = fixture('outdated')
+  view.render(); view.autoPrompt()
+  let tree = view.render()
+  assert.equal(find(tree, node => node.type?.name === 'Connection' && node.props.label === '安装扩展').props.detail, '需升级')
+  assert.match(text(tree), /请升级【薪招】浏览器扩展至 3\.2\.46 或更高版本/)
+  const dialog = guide(tree).type(guide(tree).props)
+  assert.match(text(dialog), /当前版本为 3\.2\.45/)
+  assert.match(text(dialog), /去升级薪招/)
+  assert.match(text(dialog), /已升级，重新检测/)
+  guide(tree).props.onClose()
+  find(view.render(), node => node.type === 'button' && text(node) === '连接浏览器').props.onClick()
+  assert.ok(guide(view.render()))
+  guide(view.render()).props.onClose()
+  sourcing(view.render()).props.onStart({ jobId: 'java' })
+  assert.ok(guide(view.render()))
+  assert.equal(view.requests.length, 0)
+  guide(view.render()).props.onCheck(); await tick()
+  tree = view.render()
+  assert.equal(guide(tree), undefined)
+  assert.equal(view.state().extensionInstallation.status, 'installed')
+  assert.deepEqual(view.requests.map(row => row.method), ['checkExtension'])
+  assert.equal(sourcing(tree).props.pending, false, 'upgrading never resumes a rejected task')
+})
+
+test('a version that remains outdated keeps the upgrade guide open after rechecking', async () => {
+  const view = fixture('outdated', async method => {
+    assert.equal(method, 'checkExtension')
+    return { status: 'outdated', version: '3.2.45', detail: '当前版本 3.2.45，请升级至 3.2.46 或更高版本。' }
+  })
+  view.render(); view.autoPrompt()
+  guide(view.render()).props.onCheck(); await tick()
+  const tree = view.render()
+  assert.ok(guide(tree))
+  assert.match(text(guide(tree).type(guide(tree).props)), /当前版本 3\.2\.45，请升级至 3\.2\.46/)
+  assert.equal(view.state().extensionInstallation.status, 'outdated')
+})
+
+test('unknown installation automatically opens guidance once and rechecking can confirm installation', async () => {
+  const view = fixture('unknown')
+  view.state().extensionInstallation.detail = '暂时无法读取浏览器安装记录，请检查薪招扩展。'
+  view.render(); view.autoPrompt()
+  let tree = view.render()
+  assert.ok(guide(tree))
+  assert.match(text(guide(tree).type(guide(tree).props)), /尚未确认【薪招】浏览器扩展的安装状态/)
+  assert.match(text(guide(tree).type(guide(tree).props)), /暂时无法读取浏览器安装记录/)
+  assert.equal(view.requests.length, 0, 'guidance never starts a connection or recruitment task')
+  guide(tree).props.onClose(); view.render(); view.autoPrompt()
+  assert.equal(guide(view.render()), undefined, 'polling must not repeatedly interrupt a dismissed guide')
+  find(view.render(), node => node.type === 'button' && text(node) === '安装指引').props.onClick()
+  guide(view.render()).props.onCheck(); await tick()
+  tree = view.render()
+  assert.equal(guide(tree), undefined)
+  assert.equal(view.state().extensionInstallation.status, 'installed')
+  assert.deepEqual(view.requests.map(row => row.method), ['checkExtension'])
 })

@@ -318,6 +318,13 @@ export async function createSourcingSession(ctx: SessionOptions) {
     const identityAliases = !platformIdentity && !profile.url && textIdentity
       ? [...new Set(textIdentity.aliases.map(identity => hash({ platform: channel.platform, identity })))].filter(alias => alias !== key) : []
     const keys = [key, legacyKey, ...identityAliases]
+    // Persist reads before deciding eligibility, including cards rejected by
+    // the list screen and all candidates read for a batched AI assessment.
+    const viewed = job.viewedCandidates ??= []
+    if (!viewed.some(row => row.platform === channel.platform && [row.key, ...(row.identityAliases ?? [])].some(alias => keys.includes(alias)))) {
+      viewed.push({ key, platform: channel.platform, identityAliases, platformIdentity })
+      await ctx.save(job)
+    }
     const duplicate = keys.some(alias => rejected.has(alias) || previous.has(alias)) || job.candidates.some(row => {
       if (row.platform !== channel.platform) return false
       if (platformIdentity && row.platformIdentity && platformIdentityKey(channel.platform, platformIdentity) !== platformIdentityKey(channel.platform, row.platformIdentity)) return false

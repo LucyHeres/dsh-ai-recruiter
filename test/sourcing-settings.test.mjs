@@ -4,23 +4,42 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { Store } from '../dist/lib/store.js'
+import { Store, hash } from '../dist/lib/store.js'
 import { Workbench } from '../dist/lib/workbench.js'
 import { SourcingAgent } from '../dist/lib/sourcing-agent.js'
 import { sourcingVersion } from '../dist/lib/sourcing-policy.js'
 import { readSourcingSettings, saveSourcingSettings } from '../dist/lib/sourcing-settings.js'
 import { defaultSourcingSettings } from '../dist/shared/sourcing-settings.js'
+import { sourcingMinimumScore } from '../dist/shared/sourcing-score.js'
 
 async function fixture(run) {
   const directory = await mkdtemp(join(tmpdir(), 'position-sourcing-settings-'))
   const store = new Store(directory, 'company'); await store.init()
   try { await run(store, directory) } finally { await rm(directory, { recursive: true, force: true }) }
 }
-const settings = { supplement: '有软件销售经验优先', jobDescription: '负责软件产品销售', platforms: ['boss'], limit: 2, minimumScore: 6, autoGreet: false }
+const settings = { supplement: '有软件销售经验优先', jobDescription: '负责软件产品销售', platforms: ['boss'], limit: 2, minimumScore: 6, autoGreet: true }
 const round = (id, jobId, createdAt, extra = {}) => ({ id, jobId, createdAt, kind: 'talent_sourcing',
-  ...settings, candidates: [], results: [], status: 'completed', ...extra })
+  ...settings, autoGreet: false, candidates: [], results: [], status: 'completed', ...extra })
 
-test('positions without settings use only their latest round, preserving false, zero and empty values', async () => fixture(async store => {
+test('new settings default to 80 points while historical executions retain their original threshold', () => {
+  assert.equal(defaultSourcingSettings().minimumScore, 80)
+  assert.equal(defaultSourcingSettings().autoGreet, true)
+  assert.equal(sourcingMinimumScore({}), 60)
+  assert.equal(sourcingMinimumScore({ minimumScore: 60 }), 60)
+})
+
+test('stored opt-outs are ignored for new settings and older clients cannot disable greetings', async () => fixture(async store => {
+  const key = `position-settings-${hash('legacy')}`
+  await store.put(key, { jobId: 'legacy', settings: { ...settings, autoGreet: false }, updatedAt: '' })
+  assert.deepEqual(await readSourcingSettings(store, 'legacy'), settings)
+  assert.equal((await store.get(key)).settings.autoGreet, false, 'reading does not rewrite the stored record')
+  const saved = await saveSourcingSettings(store, 'legacy', { autoGreet: false, minimumScore: 75 })
+  assert.equal(saved.autoGreet, true)
+  assert.equal(saved.minimumScore, 75, 'a custom threshold is still respected')
+  assert.equal((await store.get(key)).settings.autoGreet, true)
+}))
+
+test('positions use the latest round with greetings enabled, preserving zero and empty values', async () => fixture(async store => {
   assert.deepEqual(await readSourcingSettings(store, 'new-position'), defaultSourcingSettings())
   await store.put('sourcing-old', round('old', 'sales', '2026-10-20', { minimumScore: 90 }))
   await store.put('sourcing-new', round('new', 'sales', '2026-10-23', { minimumScore: 0, supplement: '', platforms: [] }))
@@ -56,7 +75,7 @@ test('rapid patches serialize and a concurrent read waits for all earlier edits'
     saveSourcingSettings(store, 'sales', { supplement: '最后一版', autoGreet: false }))
   const read = readSourcingSettings(store, 'sales')
   release(); await Promise.all(edits)
-  assert.deepEqual(await read, { ...defaultSourcingSettings(), limit: 3, minimumScore: 0, supplement: '最后一版', autoGreet: false })
+  assert.deepEqual(await read, { ...defaultSourcingSettings(), limit: 3, minimumScore: 0, supplement: '最后一版', autoGreet: true })
 }))
 
 test('per-platform targets save up to 100 and invalid edits preserve the last saved settings', async () => fixture(async store => {

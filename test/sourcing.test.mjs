@@ -342,6 +342,7 @@ test('preflight verifies related basic-information evidence separately from the 
     await tools.execute('sourcing_finish', { status: 'stopped', reason: '本测试仅核验列表初筛，不打开履历' })
   }, { splitEvidence: true, position: { ...position, description: 'Java 后端开发，本科' } })
   assert.equal(out.job.scanned, 1); assert.equal(out.job.candidates.length, 0); assert.equal(out.job.status, 'stopped')
+  assert.equal(out.job.viewedCandidates.length, 1, 'a screened list card counts without opening or saving a resume')
 })
 
 test('failed preflight returns its verified source for correction and rejects another card', async () => {
@@ -365,6 +366,7 @@ test('failed preflight returns its verified source for correction and rejects an
   }, { splitEvidence: true })
   assert.equal(out.job.candidates.length, 0)
   assert.equal(out.job.scanned, 1); assert.equal(out.job.status, 'stopped')
+  assert.equal(out.job.viewedCandidates.length, 1, 'correcting the evidence for the same person does not add another view')
   assert.doesNotMatch(JSON.stringify(out.job), /学历[:：]本科/)
   const { events, ...record } = out.job
   assert.doesNotMatch(JSON.stringify(record), /陈先生/)
@@ -643,9 +645,11 @@ test('sourcing search executes fill, native Enter and confirmation with the actu
 })
 
 const greet = async (tools, candidateKey) => tools.execute('sourcing_greet_candidate', {...tools.identity(), candidateKey, ref:'send', identityRef:'card', evidenceRefs:[], position:{ref:'position'}})
-test('minimum score is validated, defaults to 60, and accepts both 0 and 100',()=>{
+test('minimum score defaults to 80 and greetings default on while explicit task settings are respected',()=>{
  const input={id:randomUUID(),jobId:'job',platforms:['liepin'],limit:1,confirmed:true}
- assert.equal(sourcingStartSpec.parse(input).minimumScore,60)
+ assert.equal(sourcingStartSpec.parse(input).minimumScore,80)
+ assert.equal(sourcingStartSpec.parse(input).autoGreet,true)
+ assert.equal(sourcingStartSpec.parse({...input,autoGreet:false}).autoGreet,false)
  for(const minimumScore of [0,30,100])assert.equal(sourcingStartSpec.parse({...input,minimumScore}).minimumScore,minimumScore)
  for(const minimumScore of [-1,101,30.5,'30',null,NaN])assert.equal(sourcingStartSpec.safeParse({...input,minimumScore}).success,false)
 })

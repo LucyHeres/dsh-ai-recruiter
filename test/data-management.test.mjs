@@ -12,6 +12,7 @@ import { taskHistoryPage, sourcingResults, communicationIndex } from '../dist/li
 import { saveReceivedResume, receivedResumes, updateReceivedResume } from '../dist/lib/received-resume-store.js'
 import { DeveloperLog } from '../dist/lib/developer-log.js'
 import { Workbench } from '../dist/lib/workbench.js'
+import { positionOverview } from '../dist/lib/position-overview.js'
 
 async function fixture(run) {
   const root = await mkdtemp(join(tmpdir(), 'recruiter-data-')), store = new Store(root, 'test-company')
@@ -23,7 +24,7 @@ async function fixture(run) {
     const result = { key: hash('greet'), name: person.name, detail: '操作详情'.repeat(500), stage: 'unknown', attemptedAt: now, updatedAt: now }
     const source = { id: sourceId, kind: 'talent_sourcing', platform: 'liepin', platforms: ['liepin'], jobId: 'java',
       position: { id: 'java', name: 'Java', department: '研发', city: '北京', description: '职位要求'.repeat(300), fetchedAt: now },
-      candidates: [person], requirements: { keyword: 'Java', criteria: [] }, requirementVersion: 'version', supplement: '补充要求',
+      candidates: [person], viewedCandidates: [{key:person.key,platform:'liepin'},{key:'list-reject',platform:'liepin'}], scanned: 2, requirements: { keyword: 'Java', criteria: [] }, requirementVersion: 'version', supplement: '补充要求',
       limit: 20, channels: [], status: 'completed', createdAt: now, updatedAt: now, detail: '本轮已完成',
       events: [{ at: now, message: '任务日志'.repeat(1000) }], results: [], greetings: [{ ...result, platform: 'liepin', candidateKey: person.key }] }
     const greeting = { id: greetingId, kind: 'greeting', platform: 'liepin', jobId: 'java', limit: 1, status: 'unknown',
@@ -55,6 +56,7 @@ test('clearing task records preserves talent details, communication receipts and
   assert.equal(taskHistoryPage(jobs, 1).total, 0); assert.deepEqual(dailyUsage(jobs), quota)
   const saved = await store.get(`sourcing-${source.id}`)
   assert.deepEqual(saved.candidates, source.candidates); assert.deepEqual(saved.position, source.position)
+  assert.equal(positionOverview([{id:'java'}],jobs)[0].viewedCount,2,'clearing task history retains the live browsing data')
   assert.equal(saved.greetings[0].stage, 'unknown'); assert.equal(saved.greetings[0].name, '')
   assert.equal(saved.events, undefined); assert.equal(saved.detail, '')
   assert.equal(sourcingResults([saved], 'java', 'all', communicationIndex(jobs)).candidates[0].name, person.name)
@@ -72,7 +74,10 @@ test('clearing talents keeps task history and restores unknown attachment receip
   assert.deepEqual(sourcingResults([saved], 'java', 'all', new Map()).candidates, [])
   assert.deepEqual(sourcingResults([saved], 'java', 'all', new Map()).rounds, [])
   assert.equal(taskHistoryPage([saved], 1).records[0].completed, 1)
-  assert.deepEqual(await store.get(`greeting-${before.id}`), before)
+  assert.deepEqual(await store.get(`greeting-${before.id}`), {...before,talentCleared:true})
+  assert.equal(saved.viewedCandidates,undefined)
+  const overview=positionOverview([{id:'java'}],await greetingHistory(store))[0]
+  assert.deepEqual([overview.viewedCount,overview.greetedCount,overview.resumeCount],[0,0,0])
   assert.deepEqual(await receivedResumes(store), [])
   await assert.rejects(readFile(store.path(`received-file-${(await store.get('attachment-receipts'))[0].id}`, 'bin')), { code: 'ENOENT' })
   const receipts = await store.get('attachment-receipts')

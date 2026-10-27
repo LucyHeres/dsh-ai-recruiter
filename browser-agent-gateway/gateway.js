@@ -70,6 +70,7 @@ const session = {
   socket: null,
   socketSessionId: null,
   authenticatedDeviceId: null,
+  extensionVersion: null,
   sequence: 0,
   pending: null, // { toolCallId, capability, resolve, reject, timer }
   queue: [],
@@ -113,6 +114,7 @@ const resetSession = (reason) => {
   session.socket = null
   session.socketSessionId = null
   session.authenticatedDeviceId = null
+  session.extensionVersion = null
   session.sequence = 0
   session.receivedCallIds = new Set()
   session.state = 'idle'
@@ -126,6 +128,7 @@ const statusPayload = () => ({
   state: session.state,
   connected: Boolean(session.socket && !session.socket.closed),
   authenticated: Boolean(session.authenticatedDeviceId),
+  extensionVersion: session.extensionVersion,
   ready: session.state === 'claimed' && Boolean(session.authenticatedDeviceId),
   available: session.state === 'claimed' && !session.requiresBegin && session.executionOwner !== 'remote',
   executionOwner: session.executionOwner,
@@ -327,6 +330,7 @@ const onMessage = (raw) => {
 
       session.lifecycle = Array.isArray(message.extensionFeatures) && message.extensionFeatures.includes('local.task.lifecycle')
       session.authenticatedDeviceId = message.deviceId
+      session.extensionVersion = typeof message.extensionVersion === 'string' ? message.extensionVersion : null
       session.socketSessionId = createSessionId()
       session.state = 'authenticating'
       record(`<- agent.authenticate deviceId=${message.deviceId} extension=${message.extensionVersion || '?'}`)

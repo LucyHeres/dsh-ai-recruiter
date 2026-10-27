@@ -460,15 +460,7 @@ const TOOL_INDEX = new Map(TOOLS.map((tool) => [tool.name, tool]))
 
 // ---------------------------------------------------------------- 网关调用
 
-const readStatus = async () => {
-  try {
-    const response = await fetch(`${BASE}/api/status`, { signal: AbortSignal.timeout(2000) })
-    const body = await response.json()
-    return body?.ok ? body.data : null
-  } catch (error) {
-    return null
-  }
-}
+const readStatus = () => require('./gateway-process.cjs').readStatus(PORT)
 
 // 网关空闲会自动退出，所以每次调用前确认一下；不在就拉起并等扩展连上。
 const ensureReady = (timeoutSeconds) =>
