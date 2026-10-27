@@ -29,6 +29,7 @@ function identities() {
 
 export function positionOverview(options: JobOption[], tasks: WorkbenchJob[], activeId?: string,
   contacts: CandidateContact[] = [], resumes: ReceivedResumeRecord[] = []): PositionOverview[] {
+  const cleared = tasks.some(task => task.talentCleared)
   return options.map(position => {
     const related = tasks.filter(task => task.jobId === position.id)
     const current = related.filter(task => !task.talentCleared)
@@ -39,7 +40,6 @@ export function positionOverview(options: JobOption[], tasks: WorkbenchJob[], ac
     const viewed = sources.flatMap(task => [...(task.viewedCandidates ?? []), ...(task.candidates ?? [])]).map(candidateId)
     const qualified = sources.flatMap(task => (task.candidates ?? []).filter(person => sourcingCandidateQualified(person, sourcingMinimumScore(task)))).map(candidateId)
     const talentIdentities = viewed.slice()
-    const cleared = related.some(task => task.talentCleared)
     const greeted: string[] = []
     for (const task of current) for (const row of greetingRows([task])) {
       const linked = row as Partial<SourcingGreeting>, platform = linked.platform ?? task.platform

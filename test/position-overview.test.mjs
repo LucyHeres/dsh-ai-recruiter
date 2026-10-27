@@ -42,6 +42,8 @@ test('cleared talents reset all live counts even when older write receipts survi
  const contacts=[{platform:'liepin',identityKeys:candidateContactKeys(candidate),greetedAt:now,resumeReceivedAt:now}]
  const [result]=positionOverview([{id:'job'}],[cleared,standalone],undefined,contacts)
  assert.equal(result.viewedCount,0);assert.equal(result.greetedCount,0);assert.equal(result.resumeCount,0)
+ const [other]=positionOverview([{id:'job'}],[{...cleared,jobId:'another-position'},standalone])
+ assert.deepEqual([other.viewedCount,other.greetedCount,other.resumeCount],[0,0,0],'global talent cleanup also excludes standalone receipts for positions without sourcing rounds')
  const [fresh]=positionOverview([{id:'job'}],[cleared,{...source,id:'new',greetings:[],viewedCandidates:[{key:'fresh',platform:'liepin'}],candidates:[]}])
  assert.equal(fresh.viewedCount,1);assert.equal(fresh.greetedCount,0);assert.equal(fresh.resumeCount,0)
 })
