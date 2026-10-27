@@ -10,7 +10,8 @@ export const liepinDefinition: PlatformDefinition = {
   receivedTab: '收到简历',
   greetingLabels: new Set(['立即沟通']),
   communication: {
-    entries: ['https://lpt.liepin.com/resume/apply', 'https://lpt.liepin.com/chat/im'],
+    entries: ['https://lpt.liepin.com/chat/im'],
+    filters: { all: ['全部', '全部沟通'], greeted: [], resume_received: ['有简历'] },
     scope: page => {
       const url = new URL(page.url)
       if (url.pathname === '/resume/apply' && (/收到简历|已收简历/.test(page.title ?? '')

@@ -4,10 +4,12 @@ import { LIEPIN_POSITION_ROUTE, LIEPIN_RECOMMENDATION_ROUTE, LiepinPositionRoute
 import { LiepinSourcingDriver } from './sourcing-driver.js'
 import { liepinDefinition } from './definition.js'
 import { liepinCandidateIdentity } from './candidate-identity.js'
-import { syncLiepinResumes, LIEPIN_RESUME_ORIGINS } from './resume-sync.js'
+import { syncLiepinResumes, refreshLiepinAttachment, LIEPIN_RESUME_ORIGINS } from './resume-sync.js'
+import { isLiepinAttachmentUrl } from './received-resumes.js'
 import { liepinPromotionClose, LIEPIN_PROMOTION_GUIDANCE } from './promotion-overlay.js'
 
 export const liepinPlatform: RecruitmentPlatform = {
+  receivedAttachment: { acceptsUrl: url => isLiepinAttachmentUrl(url) && url.searchParams.get('download') !== '0', refresh: refreshLiepinAttachment },
   allowsNavigation: (page, ref, broker) => !!liepinPromotionClose(page, ref, broker),
   candidateIdentity: liepinCandidateIdentity,
   sourcingEntry: liepinDefinition.sourcingEntry,

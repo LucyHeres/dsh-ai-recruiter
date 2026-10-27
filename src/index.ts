@@ -21,6 +21,7 @@ import { readUploadChannels } from './lib/upload-options.js'
 import { Workbench } from './lib/workbench.js'
 import { readSourcingPosition } from './lib/sourcing-position.js'
 import { sourcingStartSpec } from './lib/sourcing-policy.js'
+import { ExtensionInstallationDetector } from './lib/extension-installation.js'
 import { logError, type DeveloperLogLevel } from './lib/developer-log.js'
 import { journaledTool } from './lib/call-journal.js'
 
@@ -96,7 +97,12 @@ export function apply(ctx: Context, config: Config) {
         const host = require('../browser-agent-gateway/native-registration.cjs').registerNativeHost()
         nativeConnection = { registered: true, extensionId: host.extensionId, error: '' }
         logger.write('info', 'native.registered', { extensionId: host.extensionId })
-        return () => { host.dispose(); nativeConnection.registered = false }
+        const extensionDetector = new ExtensionInstallationDetector()
+        const stopConnection = require('../browser-agent-gateway/connection-service.cjs').startConnectionService({
+          canConnect: async () => (await extensionDetector.read(false)).status !== 'not_installed',
+          onError: (error: unknown) => logger.write('warn', 'browser.autoconnect_failed', logError(error)),
+        })
+        return () => { stopConnection(); host.dispose(); nativeConnection.registered = false }
       } catch (error) {
         nativeConnection.error = 'NATIVE_HOST_REGISTRATION_FAILED'
         logger.write('warn', 'native.registration_failed', logError(error))
@@ -286,7 +292,9 @@ unknown 或 pending 都不是成功：出现 unknown 立即停止，先 result �
         const tools = (await browser.listTools(b.signal)).filter(tool => tool.name !== 'artifact_read')
         if (!tools.some(tool => tool.name === a.tool)) throw new Error(`网关未提供工具 ${a.tool}；先用 ai_recruit_browser_tools 查询`)
         callGuard.check(scope, a.tool, args, tools.find(tool => tool.name === a.tool)?.inputSchema)
-        const raw = await browser.call(a.tool, args as Record<string, unknown>, undefined, b.signal)
+        const invoke = () => browser.call(a.tool, args as Record<string, unknown>, undefined, b.signal)
+        const raw = ['browser_channel_login', 'browser_list_tabs'].includes(a.tool)
+          ? await workbench.browserProbe(invoke, b.signal) : await invoke()
         const outcome = gatewayOutcome(unwrapToolResult(raw))
         if (outcome.status !== 'succeeded') {
           throw new Error(`网关 ${a.tool} 未成功：${outcome.error ?? 'GATEWAY_FAILED'}；参数错误请核对 schema；快照过期先刷新快照；结果未知先核对实际状态，不得重放写操作。`)
@@ -303,7 +311,7 @@ unknown 或 pending 都不是成功：出现 unknown 立即停止，先 result �
 
   registerTool(defineTool({
     name: 'ai_recruit_browser_call',
-    description: '按发现的网关 schema 执行浏览器操作，包含点击、输入、导航、打招呼和发起沟通；args 可含 policy.allowedOrigins',
+    description: '按发现的网关 schema 执行浏览器操作，包含点击、输入、导航、打招呼和发起沟通；args 可含 policy.allowedOrigins。独立的 browser_channel_login、browser_list_tabs 查询会自动释放执行权；已有流程中的查询保留原流程执行权',
     parameters: { tool: { type: 'string', required: true }, args: { ...objectInput, required: true } },
     output,
     execute: executeBrowser,

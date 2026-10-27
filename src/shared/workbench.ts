@@ -25,7 +25,8 @@ export const PLATFORMS = {
 export type Platform = keyof typeof PLATFORMS
 /** 稳定的平台 key 顺序，供运行时 zod 枚举与遍历使用。 */
 export const PLATFORM_KEYS = Object.keys(PLATFORMS) as [Platform, ...Platform[]]
-export const EXTENSION_INSTALL_URL = 'https://s.xinrenxinshi.com/recruitment/xin-get'
+// Temporary local test package; replace with the production download before release.
+export const EXTENSION_INSTALL_URL = 'https://xinrenxinshi.oss-cn-beijing.aliyuncs.com/xinzhao/xinzhao_%E6%9C%AC%E5%9C%B0%E6%B5%8B%E8%AF%95%E7%89%88_v3.2.46.zip'
 /** 首次唤起 Chrome 扩展实测约 40s，留出余量避免过早报超时。 */
 // The extension's local probe may back off for 60s before starting its handshake.
 export const ENSURE_TIMEOUT_SECONDS = 90
@@ -69,6 +70,8 @@ export interface TaskResult {
   identityAliases?: string[]
 }
 export interface WorkbenchJob {
+  /** Display history was cleared; minimal execution receipts may remain. */
+  historyCleared?: boolean
   kind: TaskKind
   id: string
   platform: Platform

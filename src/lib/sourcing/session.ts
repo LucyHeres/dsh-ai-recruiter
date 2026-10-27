@@ -31,6 +31,7 @@ import { assessCandidateFilters, candidateFilterFailure } from './candidate-filt
 import { withFixedListCriteria } from './requirement-policy.js'
 import { assessListCandidate, listAssessmentFailure, validateListCriteria } from './list-screening.js'
 import { visualResumeReader } from './visual-resume.js'
+import { assertPlatformPageLogin, isPlatformLoginRequired } from '../platform-login.js'
 
 
 const now = () => new Date().toISOString()
@@ -87,6 +88,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
     const page = call.args.tabId ? (() => { try { return broker.getPage(call.args.tabId, call.args.snapshotId) } catch { return undefined } })() : undefined
     let validationStage = 'navigation_policy'
     try {
+      assertPlatformPageLogin(page ?? broker.currentPage(), channel.platform)
       if (recommendation) assertRecommendationNavigation(call, page, entryUrl, entryAliases)
       if (greeter.allows(call)) return
       const searchControl = page && call.args.ref ? searchEvidence.control(page, String(call.args.ref)) : undefined
@@ -145,6 +147,11 @@ export async function createSourcingSession(ctx: SessionOptions) {
     const result = await positionRoute.dispatch(call, page, () => searchTracker.dispatch(call, page, dispatch, () => {
       try { return broker.getPage(call.args.tabId) } catch { return undefined }
     }), page && call.args.ref ? searchEvidence.control(page, String(call.args.ref))?.kind === 'position' : false)
+    if (call.purpose !== 'business_write') {
+      assertPlatformPageLogin(result?.output ?? result, channel.platform)
+      assertPlatformPageLogin(result?.snapshot ?? result?.output?.snapshot, channel.platform)
+      assertPlatformPageLogin(broker.currentPage(), channel.platform)
+    }
     try { positionSelectorSeen ||= hasSourcingPositionSelector(broker.getPage(call.args.tabId)) } catch { /* list_tabs has no page */ }
     return result
   })
@@ -545,10 +552,10 @@ export async function createSourcingSession(ctx: SessionOptions) {
       entryUrl, sourceMode,
       position: job.position && { id: job.position.id, name: job.position.name, city: job.position.city, department: job.position.department, description: job.position.description }, supplement: job.supplement, supplementParts: supplementParts(job.supplement), requirements: job.requirements, autoGreet: !!job.autoGreet, minimumScore, platformJobs: job.platformJobs?.[channel.platform],
       searchFilters: job.searchFilters, searchOrder: ['select_platform_position', 'apply_city_experience_education', 'confirm_search', 'read_and_score_candidates'], channelLimit: quota, totalLimit: totalTarget, limitScope: job.limitScope, previousCount: previous.size }, tools, signal,
-      initialToolResults: await bootstrapSourcing(broker, entryUrl, recommendation, signal, entryAliases), maxTurns: 24 + quota * 14, maxDurationMs: 20 * 60 * 1000,
+      initialToolResults: await bootstrapSourcing(broker, entryUrl, recommendation, signal, entryAliases, channel.platform), maxTurns: 24 + quota * 14, maxDurationMs: 20 * 60 * 1000,
       modelPurpose: 'navigation', maxOutputTokens: 2048,
       logger: ctx.logger, isComplete: () => done || !greeter.awaiting && qualifiedCount() - before >= quota,
-      isFatal: error => /OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error)),
+      isFatal: error => isPlatformLoginRequired(error) || /OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error)),
       // Only host-verified milestones enter the persisted progress feed; rejected list identities stay transient.
       onProgress: async () => { signal.throwIfAborted() } }),
     complete: () => done || !greeter.awaiting && qualifiedCount() - before >= quota,

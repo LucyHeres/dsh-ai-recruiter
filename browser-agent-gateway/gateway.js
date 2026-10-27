@@ -56,6 +56,12 @@ const IDLE_EXIT_MS = (() => {
   return Number.isFinite(value) && value >= 0 ? value : DEFAULT_IDLE_EXIT_MS
 })()
 
+// The app's IPC channel is only a lifetime lease, never browser execution ownership.
+// A crash or plugin unload closes it; the gateway then resumes normal idle exit.
+const APP_CONNECTION = process.argv.includes('--app-connection') && Boolean(process.channel)
+let appReleasedAt = 0
+if (APP_CONNECTION) process.once('disconnect', () => { appReleasedAt = Date.now() })
+
 // ---------------------------------------------------------------- 会话状态
 
 const session = {
@@ -113,6 +119,9 @@ const resetSession = (reason) => {
   session.task = null
 }
 
+const idleExitAt = () => IDLE_EXIT_MS > 0 && !(APP_CONNECTION && process.connected)
+  ? Math.max(session.lastAgentCallAt, appReleasedAt) + IDLE_EXIT_MS : null
+
 const statusPayload = () => ({
   state: session.state,
   connected: Boolean(session.socket && !session.socket.closed),
@@ -131,7 +140,7 @@ const statusPayload = () => ({
   busy: Boolean(session.pending),
   lastError: session.lastError,
   idleExitMs: IDLE_EXIT_MS,
-  idleExitAt: IDLE_EXIT_MS > 0 ? new Date(session.lastAgentCallAt + IDLE_EXIT_MS).toISOString() : null
+  idleExitAt: idleExitAt() === null ? null : new Date(idleExitAt()).toISOString()
 })
 
 // ---------------------------------------------------------------- 工具调用
@@ -763,7 +772,8 @@ server.on('upgrade', (request, socket, head) => {
 
 // WS 层心跳，顺便回收僵死连接；同时负责空闲自动退出。
 const sweepTimer = setInterval(() => {
-  if (IDLE_EXIT_MS > 0 && Date.now() - session.lastAgentCallAt > IDLE_EXIT_MS) {
+  const exitAt = idleExitAt()
+  if (exitAt !== null && Date.now() > exitAt) {
     const idleLabel = IDLE_EXIT_MS >= 60000
       ? `${Math.round(IDLE_EXIT_MS / 60000)} 分钟`
       : `${Math.round(IDLE_EXIT_MS / 1000)} 秒`
@@ -792,7 +802,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[gateway]   HTTP API http://127.0.0.1:${PORT}/api/status`)
   console.log(`[gateway]   deviceToken ${DEVICE_TOKEN ? '已配置' : '未配置(不校验)'}`)
   console.log(`[gateway]   本地配置 ${fs.existsSync(LOCAL_CONFIG_PATH) ? LOCAL_CONFIG_PATH : '未找到（请先完成本机配对）'}`)
-  console.log(`[gateway]   空闲退出 ${IDLE_EXIT_MS > 0 ? `${Math.round(IDLE_EXIT_MS / 60000)} 分钟无 agent 调用后自动退出` : '已关闭（常驻）'}`)
+  console.log(`[gateway]   空闲退出 ${APP_CONNECTION && process.connected ? '薪灵运行期间保持服务，退出后恢复空闲退出' : IDLE_EXIT_MS > 0 ? `${Math.round(IDLE_EXIT_MS / 60000)} 分钟无 agent 调用后自动退出` : '已关闭（常驻）'}`)
 })
 
 module.exports = { server, session }

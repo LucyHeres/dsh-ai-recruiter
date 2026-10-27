@@ -11,10 +11,9 @@
 //
 // 退出码：0 = 已就绪（扩展已连上）；1 = 超时或失败。
 
-const path = require('path')
-const { spawn } = require('child_process')
 const { notifyExtension } = require('./connection-notification.cjs')
 const { configurationPath } = require('./config.cjs')
+const { readStatus: gatewayStatus, startGateway } = require('./gateway-process.cjs')
 
 const DEFAULT_PORT = 5030
 const DEFAULT_TIMEOUT_MS = 90 * 1000
@@ -29,32 +28,10 @@ for (const arg of process.argv.slice(2)) {
 const PORT = Number(flags.port || require('./config.cjs').port())
 const TIMEOUT_MS = Number(flags.timeout || 90) * 1000
 const QUIET = Boolean(flags.quiet)
-const BASE = `http://127.0.0.1:${PORT}`
-
 const say = (message) => { if (!QUIET) console.log(message) }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-const readStatus = async () => {
-  try {
-    const response = await fetch(`${BASE}/api/status`, { signal: AbortSignal.timeout(2000) })
-    const body = await response.json()
-    return body?.ok ? body.data : null
-  } catch (error) {
-    return null
-  }
-}
-
-const startGateway = () => {
-  const args = [path.join(__dirname, 'gateway.js'), `--port=${PORT}`]
-  if (flags['idle-exit-ms'] !== undefined) args.push(`--idle-exit-ms=${flags['idle-exit-ms']}`)
-  const child = spawn(process.execPath, args, {
-    detached: true,
-    stdio: 'ignore',
-    cwd: __dirname
-  })
-  child.unref()
-  return child.pid
-}
+const readStatus = () => gatewayStatus(PORT)
 
 const main = async () => {
   let status = await readStatus()
@@ -66,7 +43,7 @@ const main = async () => {
 
   if (!status) {
     require('./config.cjs').requirePairing()
-    const pid = startGateway()
+    const { pid } = startGateway({ port: PORT, idleExitMs: flags['idle-exit-ms'] })
     say(`网关未运行，已自动拉起（pid=${pid}，端口 ${PORT}）`)
   } else {
     say('网关已在运行，等待扩展连接…')

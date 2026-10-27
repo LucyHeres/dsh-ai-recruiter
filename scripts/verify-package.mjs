@@ -9,6 +9,9 @@ const p = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 const [pack] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: root, encoding: 'utf8' }))
 const files = new Set(pack.files.map(f => f.path))
 assert.ok(files.has('skills/recruitment-matching/SKILL.md'), 'Missing bundled recruitment matching skill')
+for (const file of ['browser-agent-gateway/connection-service.cjs', 'browser-agent-gateway/gateway-process.cjs']) {
+  assert.ok(files.has(file), `Missing ${file}`)
+}
 for (const file of [p.main, p.types, p.dsh.bundle.patch, 'README.md', 'skills/xinzhao-browser-control/SKILL.md', 'browser-agent-gateway/package.json', 'browser-agent-gateway/mcp-server.js', 'browser-agent-gateway/gateway.js', 'browser-agent-gateway/ensure.js', 'browser-agent-gateway/ws-server.js', 'browser-agent-gateway/protocol.js', 'browser-agent-gateway/config.cjs', p.bin['dsh-ai-recruiter-browser'], 'dsh-target.json', 'docs/verification.md', 'examples/config.patch.yml']) {
   assert.ok(files.has(file.replace(/^\.\//, '')), `Missing ${file}`)
 }

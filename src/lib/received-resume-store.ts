@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { readFile, writeFile, rename, lstat, rm } from 'node:fs/promises'
+import { lstat, readdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { Store, hash } from './store.js'
 import { candidateContactKeys } from './candidate-contact.js'
 import type { SourcingCandidate, SourcingJob, ReceivedResumeAttachment } from '../shared/sourcing.js'
-import type { CapturedFile } from './file-transfer.js'
+
+export interface ResumeFileFingerprint { mimeType: string; size: number; sha256: string }
 
 export interface ReceivedResumeRecord {
   id: string; platform: SourcingCandidate['platform']; identityKeys: string[]; resumeId: string; conversationId: string; messageId: string
@@ -11,18 +12,30 @@ export interface ReceivedResumeRecord {
   /** Private observed download address. Never sent in list or diagnostic output. */
   downloadUrl?: string
   attachmentId?: string
-  cached?: { mimeType: string; size: number; sha256: string }
+  content?: ResumeFileFingerprint
+  /** Legacy fingerprint. Kept for upload deduplication until old files are cleared. */
+  cached?: ResumeFileFingerprint
   uploads?: Record<string, { taskId: string; stage: 'saved' | 'unknown' | 'failed'; at: string; error?: string }>
 }
 export const receivedResumes = async (store: Store) => await store.find<ReceivedResumeRecord[]>('received-resumes') ?? []
+type AttachmentReceipt = Pick<ReceivedResumeRecord, 'id' | 'content' | 'uploads'>
+/** Only hashes and write receipts survive a user clearing the talent list. */
+export async function clearReceivedResumeRecords(store: Store) {
+  const receipts = await store.find<AttachmentReceipt[]>('attachment-receipts') ?? []
+  const merged = new Map(receipts.map(row => [row.id, row]))
+  for (const row of await receivedResumes(store)) merged.set(row.id, { id: row.id, content: row.content ?? row.cached, uploads: row.uploads })
+  await store.put('attachment-receipts', [...merged.values()])
+  await store.put('received-resumes', [])
+}
 
-export async function saveReceivedResume(store: Store, candidate: SourcingCandidate, evidence: Omit<ReceivedResumeRecord, 'id' | 'platform' | 'identityKeys' | 'observedAt' | 'uploads' | 'cached'>) {
+export async function saveReceivedResume(store: Store, candidate: SourcingCandidate, evidence: Omit<ReceivedResumeRecord, 'id' | 'platform' | 'identityKeys' | 'observedAt' | 'uploads' | 'cached' | 'content'>) {
   if (!evidence.resumeId || !evidence.conversationId || !evidence.messageId || !evidence.fileName) throw new Error('RECEIVED_RESUME_IDENTITY_REQUIRED')
   if (candidate.platformIdentity && candidate.platformIdentity.id !== evidence.resumeId) throw new Error('RECEIVED_RESUME_IDENTITY_MISMATCH')
   const id = hash([candidate.platform, evidence.resumeId, evidence.conversationId, evidence.messageId, evidence.attachmentId || evidence.fileName])
-  const records = await receivedResumes(store), prior = records.find(row => row.id === id)
+  const records = await receivedResumes(store), existing = records.find(row => row.id === id)
+  const prior = existing ?? (await store.find<AttachmentReceipt[]>('attachment-receipts'))?.find(row => row.id === id)
   const record: ReceivedResumeRecord = { ...prior, ...evidence, id, platform: candidate.platform,
-    identityKeys: [...new Set([...(prior?.identityKeys ?? []), ...candidateContactKeys(candidate)])], observedAt: new Date().toISOString() }
+    identityKeys: [...new Set([...(existing?.identityKeys ?? []), ...candidateContactKeys(candidate)])], observedAt: new Date().toISOString() }
   await store.put('received-resumes', [...records.filter(row => row.id !== id), record])
   return { record, added: !prior }
 }
@@ -31,7 +44,7 @@ export const matchesReceivedResume = (candidate: SourcingCandidate, row: Receive
   && row.identityKeys.some(key => candidateContactKeys(candidate).includes(key))
 
 export function candidateAttachments(candidate: SourcingCandidate, jobId: string, records: ReceivedResumeRecord[]): ReceivedResumeAttachment[] {
-  return records.filter(row => row.cached && matchesReceivedResume(candidate, row)).sort((a, b) => (b.receivedAt || b.observedAt).localeCompare(a.receivedAt || a.observedAt))
+  return records.filter(row => (row.downloadUrl || row.attachmentId || row.cached) && matchesReceivedResume(candidate, row)).sort((a, b) => (b.receivedAt || b.observedAt).localeCompare(a.receivedAt || a.observedAt))
     .map(row => ({ id: row.id, fileName: row.fileName, receivedAt: row.receivedAt,
       uploadedAt: row.uploads?.[jobId]?.stage === 'saved' ? row.uploads[jobId].at : undefined,
       uploadStopped: row.uploads?.[jobId]?.stage === 'unknown' || undefined, uploadError: row.uploads?.[jobId]?.error }))
@@ -40,26 +53,6 @@ export async function updateReceivedResume(store: Store, id: string, change: (ro
   const rows = await receivedResumes(store), row = rows.find(row => row.id === id)
   if (!row) throw new Error('RECEIVED_RESUME_NOT_FOUND')
   change(row); await store.put('received-resumes', rows); return row
-}
-const cachePath = (store: Store, id: string) => {
-  if (!/^[a-f0-9]{64}$/.test(id)) throw new Error('RECEIVED_RESUME_ID_INVALID')
-  return store.path(`received-file-${id}`, 'bin')
-}
-export async function cacheReceivedFile(store: Store, row: ReceivedResumeRecord, file: CapturedFile) {
-  const bytes = Buffer.from(await file.blob.arrayBuffer())
-  if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error('RECEIVED_RESUME_SIZE_INVALID')
-  const extension = row.fileName.split('.').at(-1)?.toLowerCase()
-  const valid = extension === 'pdf' ? bytes.subarray(0, 5).toString() === '%PDF-'
-    : extension === 'doc' ? bytes.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex'))
-    : extension === 'docx' && bytes.subarray(0, 4).equals(Buffer.from('504b0304', 'hex'))
-  if (!valid) throw new Error('RECEIVED_RESUME_FORMAT_INVALID: 取得的内容不是有效简历附件')
-  const cached = { mimeType: file.blob.type || 'application/octet-stream', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
-  await store.init()
-  const dest = cachePath(store, row.id), temporary = dest + '.' + randomUUID() + '.tmp'
-  try { await writeFile(temporary, bytes, { mode: 0o600, flag: 'wx' }); await rename(temporary, dest) }
-  finally { await rm(temporary, { force: true }) }
-  await updateReceivedResume(store, row.id, record => { record.cached = cached })
-  return { blob: new Blob([new Uint8Array(bytes)], { type: cached.mimeType }), fileName: row.fileName }
 }
 
 /** Resolve a UI selection through the job's stored candidates. Names and
@@ -75,13 +68,31 @@ export async function selectReceivedResumes(store: Store, jobId: string, roundId
     return row
   })
 }
-export async function cachedReceivedFile(store: Store, row: ReceivedResumeRecord): Promise<CapturedFile | undefined> {
-  if (!row.cached) return
-  const path = cachePath(store, row.id)
-  try {
-    if ((await lstat(path)).isSymbolicLink()) throw new Error('RECEIVED_RESUME_CACHE_INVALID')
-    const bytes = await readFile(path)
-    if (bytes.length !== row.cached.size || createHash('sha256').update(bytes).digest('hex') !== row.cached.sha256) throw new Error('RECEIVED_RESUME_CACHE_INVALID')
-    return { blob: new Blob([new Uint8Array(bytes)], { type: row.cached.mimeType }), fileName: row.fileName }
-  } catch (error: any) { if (error.code !== 'ENOENT') throw error }
+async function legacyFiles(store: Store) {
+  await store.init()
+  const files = []
+  for (const name of await readdir(store.root)) {
+    if (!/^received-file-[a-f0-9]{64}\.bin(?:\.[a-f0-9-]{36}\.tmp)?$/.test(name)) continue
+    const path = join(store.root, name)
+    let stat
+    try { stat = await lstat(path) } catch (error: any) { if (error.code === 'ENOENT') continue; throw error }
+    if (stat.isFile() && !stat.isSymbolicLink()) files.push({ path, size: stat.size })
+  }
+  return files
+}
+export async function receivedResumeStorage(store: Store) {
+  const files = await legacyFiles(store)
+  return { fileCount: files.length, bytes: files.reduce((sum, file) => sum + file.size, 0) }
+}
+/** Caller holds the task lock. Preserve fingerprints and receipts before removing bytes. */
+export async function clearReceivedResumeCache(store: Store) {
+  const rows = await receivedResumes(store)
+  for (const row of rows) if (row.cached) { row.content ??= row.cached; delete row.cached }
+  await store.put('received-resumes', rows)
+  const files = await legacyFiles(store)
+  let fileCount = 0, bytes = 0
+  for (const file of files) {
+    await rm(file.path, { force: true }); fileCount++; bytes += file.size
+  }
+  return { fileCount, bytes }
 }

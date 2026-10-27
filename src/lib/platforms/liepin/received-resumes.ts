@@ -46,7 +46,7 @@ export function liepinConversation(response: any, contact: LiepinContact, expect
   // chat/user IDs; the requested candidate ID must occur in that evidence.
   const resumeId = expectedResumeId ? identities.has(expectedResumeId) ? expectedResumeId : undefined
     : contact.resumeId ?? (identities.size === 1 ? [...identities][0] : undefined)
-  if (!resumeId || !messages.length) return { resumeId: undefined, files: [] as LiepinReceivedFile[] }
+  if (!resumeId || !messages.length) return { chatMatched: messages.length > 0, resumeId: undefined, files: [] as LiepinReceivedFile[] }
   const files: LiepinReceivedFile[] = []
   for (const r of messages) {
     const body = business(r.payload), data = object(body?.bizData), param = json(data?.attachmentResume?.param)
@@ -54,15 +54,17 @@ export function liepinConversation(response: any, contact: LiepinContact, expect
       || !id(param?.encodeAttachmentId) || param?.userId !== contact.userId) continue
     files.push({ resumeId, conversationId: contact.imId, messageId: r.msgId, attachmentId: param.encodeAttachmentId, receivedAt: time(r.msgTime) })
   }
-  return { resumeId, files }
+  return { chatMatched: true, resumeId, files }
 }
 export function liepinAttachmentAddress(response: any) {
   const data = response?.flag === 1 ? response.data : undefined
   if (!data || typeof data.fileName !== 'string' || !data.fileName.trim() || typeof data.accessPath !== 'string') throw new Error('LIEPIN_ATTACHMENT_RESPONSE_CHANGED')
   const url = new URL(data.accessPath)
-  if (url.origin !== 'https://tdoss.liepin.com' || url.username || url.password || !url.pathname.startsWith('/o/recruit-auth/resume/attachment-res/')) throw new Error('LIEPIN_ATTACHMENT_ADDRESS_INVALID')
+  if (!isLiepinAttachmentUrl(url)) throw new Error('LIEPIN_ATTACHMENT_ADDRESS_INVALID')
   const extension = String(data.fileExtension).replace(/^\./, '').toLowerCase()
   if (!['pdf', 'doc', 'docx'].includes(extension)) throw new Error('LIEPIN_ATTACHMENT_FORMAT_UNSUPPORTED')
   const fileName = data.fileName.replace(/[\\/\x00-\x1f]/g, '_').slice(0, 150)
   return { downloadUrl: url.href, fileName: new RegExp(`\\.${extension}$`, 'i').test(fileName) ? fileName : `${fileName}.${extension}` }
 }
+export const isLiepinAttachmentUrl = (url: URL) => url.origin === 'https://tdoss.liepin.com' && !url.username && !url.password
+  && !url.hash && url.pathname.startsWith('/o/recruit-auth/resume/attachment-res/')

@@ -3,8 +3,11 @@ import { test } from 'node:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { Store } from '../dist/lib/store.js'
 import { Workbench } from '../dist/lib/workbench.js'
+import { SourcingAgent } from '../dist/lib/sourcing-agent.js'
+import { sourcingVersion } from '../dist/lib/sourcing-policy.js'
 import { readSourcingSettings, saveSourcingSettings } from '../dist/lib/sourcing-settings.js'
 import { defaultSourcingSettings } from '../dist/shared/sourcing-settings.js'
 
@@ -13,7 +16,7 @@ async function fixture(run) {
   const store = new Store(directory, 'company'); await store.init()
   try { await run(store, directory) } finally { await rm(directory, { recursive: true, force: true }) }
 }
-const settings = { supplement: '有软件销售经验优先', platforms: ['boss'], limit: 2, minimumScore: 6, autoGreet: false }
+const settings = { supplement: '有软件销售经验优先', jobDescription: '负责软件产品销售', platforms: ['boss'], limit: 2, minimumScore: 6, autoGreet: false }
 const round = (id, jobId, createdAt, extra = {}) => ({ id, jobId, createdAt, kind: 'talent_sourcing',
   ...settings, candidates: [], results: [], status: 'completed', ...extra })
 
@@ -56,11 +59,15 @@ test('rapid patches serialize and a concurrent read waits for all earlier edits'
   assert.deepEqual(await read, { ...defaultSourcingSettings(), limit: 3, minimumScore: 0, supplement: '最后一版', autoGreet: false })
 }))
 
-test('invalid edits are rejected without erasing the last saved settings', async () => fixture(async store => {
+test('per-platform targets save up to 100 and invalid edits preserve the last saved settings', async () => fixture(async store => {
+  for (const limit of [1, 51, 100]) {
+    await saveSourcingSettings(store, 'sales', { limit })
+    assert.equal((await readSourcingSettings(store, 'sales')).limit, limit)
+  }
   await saveSourcingSettings(store, 'sales', settings)
-  for (const invalid of [{ limit: 0 }, { limit: 51 }, { minimumScore: -1 }, { minimumScore: 101 },
+  for (const invalid of [{ limit: 0 }, { limit: 101 }, { limit: 1.5 }, { minimumScore: -1 }, { minimumScore: 101 },
     { minimumScore: NaN }, { minimumScore: 6.5 }, { autoGreet: 'false' }, { platforms: ['unknown'] },
-    { supplement: 'a'.repeat(4001) }, { candidates: [] }]) {
+    { supplement: 'a'.repeat(4001) }, { jobDescription: 'a'.repeat(20001) }, { jobDescription: null }, { candidates: [] }]) {
     await assert.rejects(saveSourcingSettings(store, 'sales', invalid))
   }
   assert.deepEqual(await readSourcingSettings(store, 'sales'), settings)
@@ -85,4 +92,36 @@ test('workbench restores settings alongside fresh position details and saves onl
   await assert.rejects(service.saveSourcingSettings({ jobId: '../outside', settings: { limit: 0 } }))
   await assert.rejects(service.saveSourcingSettings({ jobId: '', settings }))
   assert.deepEqual(await store.list('sourcing-'), [])
+}))
+
+test('edited JDs reach task requirements and invalidate cached standards while preserving fixed conditions', async () => fixture(async store => {
+  const position = { id: 'sales', name: '销售', city: '上海', platforms: ['boss'],
+    description: '原始职位职责\n学历要求：大专', descriptionHtml: '<p>原始职位职责</p>',
+    jobDescription: { text: '原始职位职责', html: '<p>原始职位职责</p>' },
+    basicRequirements: { education: '大专', experience: '1–3年', city: '上海', salary: '10–20K' },
+    searchFields: { education: '大专', experience: '1–3年', city: '上海' } }
+  const agent = new SourcingAgent(store, async () => { throw new Error('unexpected browser action') },
+    async () => {}, async () => [], () => async () => {}, async () => position)
+  const prepare = async jobDescription => {
+    const job = agent.create({ id: randomUUID(), jobId: 'sales', platforms: ['boss'], limit: 1, confirmed: true,
+      ...(jobDescription === undefined ? {} : { jobDescription }) })
+    await agent.prepare(job, new AbortController().signal)
+    return job
+  }
+  const edited = '负责软件产品销售\n熟悉 SQL <基础> & 客户管理'
+  await saveSourcingSettings(store, 'sales', { jobDescription: edited })
+  const job = await prepare((await readSourcingSettings(store, 'sales')).jobDescription)
+  assert.equal(job.position.jobDescription.text, edited)
+  assert.match(job.position.description, /SQL <基础> & 客户管理/)
+  assert.doesNotMatch(job.position.description, /原始职位职责/)
+  assert.equal(job.position.descriptionHtml, '')
+  for (const value of Object.values(position.basicRequirements)) assert.ok(job.position.description.includes(value))
+  assert.deepEqual(job.position.basicRequirements, position.basicRequirements)
+  assert.notEqual(job.requirementVersion, sourcingVersion(position, ''))
+  await saveSourcingSettings(store, 'sales', { jobDescription: '' })
+  const cleared = await prepare((await readSourcingSettings(store, 'sales')).jobDescription)
+  assert.equal(cleared.position.jobDescription.text, '')
+  assert.doesNotMatch(cleared.position.description, /原始职位职责|负责软件产品销售/)
+  assert.match(cleared.position.description, /学历要求：大专/)
+  assert.deepEqual((await prepare()).position, position, 'omitting the edit preserves the freshly loaded source')
 }))

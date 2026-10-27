@@ -86,9 +86,9 @@ test('known startup returns a unique search tab to recommendations once, without
   const seeds = await bootstrapSourcing(broker, entry, true, signal)
   assert.deepEqual(calls, [{ tabId: 1, url: entry, purpose: 'navigation' }])
   assert.deepEqual(seeds.map(s => s.name), ['browser_list_tabs', 'browser_navigate'])
-  for (const page of [{ tabId: 1, url: entry }, { tabId: 1, url: 'https://lpt.liepin.com/login', isLoginPage: true }]) {
-    await bootstrapSourcing({ ...broker, currentPage: () => page }, entry, true, signal)
-  }
+  await bootstrapSourcing({ ...broker, currentPage: () => ({ tabId: 1, url: entry }) }, entry, true, signal)
+  for (const recommendation of [true, false]) await assert.rejects(bootstrapSourcing({ ...broker,
+    currentPage: () => ({ tabId: 1, url: 'https://lpt.liepin.com/login', isLoginPage: true }) }, entry, recommendation, signal), error => error.code === 'PLATFORM_LOGIN_REQUIRED')
   assert.equal(calls.length, 1)
   await assert.rejects(bootstrapSourcing({ ...broker, tools: [{ name: 'browser_navigate', execute: async () => { throw Error('BROWSER_WRITE_OUTCOME_UNKNOWN') } }] }, entry, true, signal), /OUTCOME_UNKNOWN/)
 })
@@ -103,6 +103,18 @@ test('startup opens only when no platform tab exists and leaves ambiguous platfo
   const tabs = [1, 2].map(tabId => ({ tabId, url: 'https://lpt.liepin.com/search' }))
   await bootstrapSourcing({ ...broker, bootstrap: async () => [{ name: 'browser_list_tabs', value: { tabs } }] }, entry, true, signal)
   assert.equal(opened, 1)
+})
+
+test('opening a sourcing page that redirects to login ends the attempt and preserves that tab', async () => {
+  const calls = []; let page
+  const broker = { bootstrap: async () => [{ name: 'browser_list_tabs', value: { tabs: [] } }], currentPage: () => page,
+    tools: [{ name: 'browser_open_tab', execute: async () => { calls.push('open'); page = { tabId: 1, url: 'https://passport.liepin.com/login', isLoginPage: true }; return { tabId: 1 } } }] }
+  await assert.rejects(bootstrapSourcing(broker, entry, true, signal), error => error.code === 'PLATFORM_LOGIN_REQUIRED')
+  page = { tabId: 1, url: entry }
+  await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(calls, ['open'])
+  const uncached = { ...broker, currentPage: () => undefined,
+    tools: [{ name: 'browser_open_tab', execute: async () => ({ tabId: 2, url: 'https://passport.liepin.com/login' }) }] }
+  await assert.rejects(bootstrapSourcing(uncached, entry, true, signal), error => error.code === 'PLATFORM_LOGIN_REQUIRED')
 })
 
 test('recommendation recovery instructions have no search-entry fallback; explicit search retains its own preparation', () => {

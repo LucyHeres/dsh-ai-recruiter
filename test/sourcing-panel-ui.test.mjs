@@ -13,7 +13,7 @@ const rounds = [{...current,number:2},{...current,id:'old',number:1,candidateCou
 const summaries = people.map((person,i)=>({...person,roundId:i?'new':'old',roundNumber:i?2:1,roundCreatedAt:current.createdAt,resultKey:`${i?'new':'old'}:${person.key}`}))
 const results = {jobId:'java',roundId:'all',rounds,current,candidates:summaries}
 const details = (i) => ({jobId:'java',roundId:i?'new':'old',candidate:people[i],requirements:{criteria:[{id:'java',label:i?'新轮要求':'旧轮要求',must:true,quote:i?'新的要求':'旧的要求',weight:100}]}})
-const indexes = {jobId:2,position:3,positionLoading:4,supplement:5,platforms:6,limit:7,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,autoGreet:22,expanded:23,minimumScore:24,syncing:25,communicationNotice:26}
+const indexes = {jobId:2,position:3,positionLoading:4,supplement:5,platforms:6,limit:7,results:8,roundId:9,detailData:10,view:11,selectedKey:12,filter:13,detail:14,error:15,reload:16,loading:17,stopping:18,mobile:19,sort:20,detailLoading:21,autoGreet:22,expanded:23,minimumScore:24,syncing:25,communicationNotice:26,jobDescription:29}
 function fixture(overrides={}, locked=true, compact=false, options={}) {
   const states=[[],false,'java',position,false,'',['liepin'],10,results,'all',details(1),'results','',{score:'all',communication:'all',platform:'all'},'analysis','',0,false,false,false,'score-desc',false,undefined,true]
   Object.entries(overrides).forEach(([name,value])=>states[indexes[name]]=value)
@@ -21,7 +21,7 @@ function fixture(overrides={}, locked=true, compact=false, options={}) {
   const react={...require('react'),useState:initial=>{const i=index++;if(states[i]===undefined)states[i]=typeof initial==='function'?initial():initial;return [states[i],v=>{states[i]=typeof v==='function'?v(states[i]):v}]},useRef:value=>{const i=refIndex++;return refs[i]??={current:value}},useEffect:(effect,deps)=>effects.push({effect,deps})}
   const module={exports:{}}
   runInNewContext(source,{module,exports:module.exports,require:name=>name==='react'?react:require(name),AbortController,setTimeout:options.setTimeout??setTimeout,clearTimeout:options.clearTimeout??clearTimeout,crypto:require('node:crypto').webcrypto})
-  const render=()=>{index=0;refIndex=0;effects=[];return module.exports.SourcingPanel({compact,positionId:options.positionId,executionId:options.executionId,rpc:async(...args)=>{requests.push(args);return options.rpc ? options.rpc(...args) : details(1)},state:options.state??{activeJobId:'new',jobs:[{...current,kind:'talent_sourcing'}]},locked,pending:options.pending??false,busy:options.busy??'',onStart:request=>starts.push(request),onReconcile(){}})}
+  const render=()=>{index=0;refIndex=0;effects=[];return module.exports.SourcingPanel({compact,positionId:options.positionId,executionId:options.executionId,onRequireExtension:options.onRequireExtension,rpc:async(...args)=>{requests.push(args);return options.rpc ? options.rpc(...args) : details(1)},state:options.state??{activeJobId:'new',jobs:[{...current,kind:'talent_sourcing'}]},locked,pending:options.pending??false,busy:options.busy??'',onStart:request=>starts.push(request),onReconcile(){}})}
   return {render,states,starts,requests,effects:()=>effects,set:(name,value)=>states[indexes[name]]=value,get:name=>states[indexes[name]]}
 }
 function elements(element){if(Array.isArray(element))return element.flatMap(elements);if(element==null||typeof element==='boolean')return [];return typeof element==='object'?[element,...elements(element.props?.children)]:[element]}
@@ -29,6 +29,27 @@ const text=element=>elements(element).filter(item=>typeof item!=='object').join(
 const find=(tree,predicate)=>elements(tree).find(row=>row?.props&&predicate(row))
 const button=(tree,label)=>find(tree,row=>row.type==='button'&&(text(row)===label||row.props['aria-label']===label))
 const cards=tree=>elements(tree).filter(row=>row?.props?.className?.startsWith('air-sourcing-person '))
+
+test('sync opens installation guidance without making a request when the extension is missing',async()=>{
+ let prompts=0
+ const view=fixture({},false,false,{state:{jobs:[],extensionInstallation:{status:'not_installed'}},onRequireExtension:()=>prompts++})
+ button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(prompts,1);assert.equal(view.requests.length,0);assert.equal(view.get('syncing'),false)
+})
+
+test('both sourcing buttons explain missing installation before validating settings in either layout',()=>{
+ for(const compact of [false,true])for(const settings of [false,true]){
+  let prompts=0
+  const view=fixture({view:settings?'requirements':'results',platforms:[],limit:0},false,compact,{
+   state:{jobs:[],extensionInstallation:{status:'not_installed'}},onRequireExtension:()=>prompts++})
+  const tree=view.render(),scope=settings?find(tree,row=>row.props.title==='寻聘设置'):tree
+  const start=button(scope,'开始寻聘')
+  assert.equal(start.props.disabled,false,'installation guidance must be reachable even with unfinished settings')
+  start.props.onClick()
+  assert.equal(prompts,1);assert.equal(view.starts.length,0);assert.equal(view.requests.length,0)
+  assert.equal(view.get('view'),settings?'requirements':'results','the missing-extension prompt comes before configuration navigation')
+ }
+})
 
 test('edits restore per position after leaving the panel without starting a task',async()=>{
  const {Store}=await import('../dist/lib/store.js')
@@ -61,6 +82,7 @@ test('edits restore per position after leaving the panel without starting a task
   assert.deepEqual(Array.from(view.get('platforms')),['boss'])
   const input=(id,value)=>find(view.render(),row=>row.props.id===id).props.onChange({target:{value}})
   input('air-sourcing-limit','7');input('air-sourcing-minimum-score','0');input('air-sourcing-supplement','')
+  input('air-sourcing-job-description','负责新的 Java 核心模块\n熟悉 SQL')
   find(find(view.render(),row=>row.props.className==='air-auto-greet'),row=>row.type==='input').props.onChange({target:{checked:true}})
   find(find(view.render(),row=>row.type==='fieldset'),row=>row.type==='input'&&row.props.checked).props.onChange({target:{checked:false}})
   await drain();assert.equal(view.starts.length,0)
@@ -68,6 +90,7 @@ test('edits restore per position after leaving the panel without starting a task
   await load(remounted)
   assert.equal(remounted.get('limit'),7);assert.equal(remounted.get('minimumScore'),0)
   assert.equal(remounted.get('autoGreet'),true);assert.equal(remounted.get('supplement'),'')
+  assert.equal(find(remounted.render(),row=>row.props.id==='air-sourcing-job-description').props.value,'负责新的 Java 核心模块\n熟悉 SQL')
   assert.deepEqual(Array.from(remounted.get('platforms')),[],'an intentionally empty platform selection survives re-entry')
   const switchTo=async id=>{
    options.positionId=id;remounted.render()
@@ -77,8 +100,10 @@ test('edits restore per position after leaving the panel without starting a task
   await switchTo('sales')
   assert.equal(remounted.get('limit'),4);assert.equal(remounted.get('minimumScore'),80)
   assert.equal(remounted.get('supplement'),'销售职位要求');assert.deepEqual(Array.from(remounted.get('platforms')),['liepin'])
+  assert.equal(find(remounted.render(),row=>row.props.id==='air-sourcing-job-description').props.value,'当前职位最新描述')
   await switchTo('java')
   assert.equal(remounted.get('limit'),7);assert.equal(remounted.get('minimumScore'),0)
+  assert.equal(find(remounted.render(),row=>row.props.id==='air-sourcing-job-description').props.value,'负责新的 Java 核心模块\n熟悉 SQL')
   const platformEffect=remounted.effects().find(row=>row.deps?.length===3&&row.deps[0]==='java'&&row.deps[1]==='java')
   platformEffect.effect();assert.deepEqual(Array.from(remounted.get('platforms')),[])
   const settingsPane=find(remounted.render(),row=>row.props.title==='寻聘设置')
@@ -96,8 +121,27 @@ test('transient invalid numbers do not overwrite settings and persistence failur
  assert.equal(view.requests[0][1].settings.minimumScore,0)
  assert.match(text(view.render()),/寻聘设置保存失败.*磁盘不可写/)
  const loading=fixture({view:'requirements',positionLoading:true},false,false,{state:{jobs:[]}}).render()
- for(const id of ['air-sourcing-limit','air-sourcing-minimum-score','air-sourcing-supplement'])assert.equal(find(loading,row=>row.props.id===id).props.disabled,true)
+ for(const id of ['air-sourcing-limit','air-sourcing-minimum-score','air-sourcing-supplement','air-sourcing-job-description'])assert.equal(find(loading,row=>row.props.id===id).props.disabled,true)
  assert.equal(find(find(loading,row=>row.props.className==='air-auto-greet'),row=>row.type==='input').props.disabled,true)
+})
+
+test('editable job descriptions are saved and submitted without changing the read-only fixed conditions',()=>{
+ const view=fixture({view:'requirements'},false,false,{state:{jobs:[]}})
+ const description=()=>find(view.render(),row=>row.props.id==='air-sourcing-job-description')
+ const basic=find(view.render(),row=>row.props.id==='air-sourcing-basic-requirements')
+ assert.equal(description().props.disabled,false);assert.notEqual(description().props.readOnly,true)
+ assert.equal(basic.props.disabled,true);assert.equal(basic.props.readOnly,true)
+ description().props.onChange({target:{value:'负责数据平台开发\n熟悉 SQL'}})
+ assert.equal(description().props.value,'负责数据平台开发\n熟悉 SQL')
+ assert.equal(view.requests[0][1].settings.jobDescription,'负责数据平台开发\n熟悉 SQL')
+ button(view.render(),'开始寻聘').props.onClick()
+ assert.equal(view.starts[0].jobDescription,'负责数据平台开发\n熟悉 SQL')
+ view.set('view','requirements');description().props.onChange({target:{value:''}})
+ assert.equal(description().props.value,'','clearing the JD cannot restore the source description')
+ button(view.render(),'开始寻聘').props.onClick()
+ assert.equal(view.starts[1].jobDescription,'','fixed conditions still permit sourcing with an explicitly empty JD')
+ const locked=fixture({view:'requirements'}).render()
+ assert.equal(find(locked,row=>row.props.id==='air-sourcing-job-description').props.disabled,true)
 })
 
 test('a late position-settings response cannot replace the next selected position',async()=>{
@@ -150,7 +194,8 @@ test('settings derive executable platforms from the current job and hide channel
  const view=fixture({view:'requirements',position:job,platforms:['liepin','boss']},false,false,{state:{jobs:[]}})
  const fieldset=find(view.render(),row=>row.type==='fieldset')
  assert.match(text(fieldset),/猎聘/);assert.doesNotMatch(text(fieldset),/BOSS/)
- assert.match(text(find(view.render(),row=>row.props.className==='air-sourcing-published-platforms')),/已关联平台 猎聘/)
+ assert.equal(find(fieldset,row=>row.props.className?.includes('air-platform-tag')),undefined,'platform choices use plain text')
+ assert.equal(find(view.render(),row=>row.props.className==='air-sourcing-published-platforms'),undefined,'connected platforms are shown once in the selection field')
  assert.doesNotMatch(text(view.render()),/猎头/)
  button(view.render(),'开始寻聘').props.onClick();assert.deepEqual(Array.from(view.starts[0].platforms),['liepin'])
  const internal=fixture({view:'requirements',position:{...job,publishedChannels:[{id:'20',name:'内部推荐'},{id:'21',name:'招聘门户'},{id:'34',name:'猎头'}]}},false,false,{state:{jobs:[]}})
@@ -175,7 +220,7 @@ test('settings remains visible and readable while execution is locked, with dupl
  settings.props.onClick();const opened=view.render();assert.equal(view.get('view'),'requirements')
  assert.ok(find(opened,row=>row.props.title==='寻聘设置'))
  assert.equal(button(opened,'开始寻聘'),undefined);assert.equal(button(opened,'停止寻聘').props.disabled,false)
- assert.match(text(opened),/具备 Java 项目经验/)
+ assert.equal(find(opened,row=>row.props.id==='air-sourcing-job-description').props.value,'具备 Java 项目经验')
 })
 test('changing the round cannot flash the old list or details and reset returns to all rounds',()=>{
  const view=fixture();view.set('roundId','old')
@@ -219,6 +264,7 @@ test('sync reads the selected position, disables reentry and refreshes result/de
  const sync=button(view.render(),'同步平台简历');assert.equal(sync.props.disabled,false)
  sync.props.onClick();sync.props.onClick();assert.equal(view.requests.length,1)
  assert.equal(view.requests[0][0],'syncCommunication');assert.equal(view.requests[0][1].jobId,'java')
+ assert.equal(view.requests[0][1].roundId,'all')
  assert.equal(button(view.render(),'正在同步…').props.disabled,true)
  finish({checked:2,matched:1,updated:1,platforms:[{platform:'liepin',matched:1,detail:'已同步'}]})
  await new Promise(resolve=>setImmediate(resolve))
@@ -242,6 +288,22 @@ test('failed/aborted sync preserves received data and changing position aborts o
  view.set('jobId','another');view.render();view.effects().find(row=>row.deps?.length===1&&row.deps[0]==='another').effect()
  finish({checked:2,matched:1,updated:1,platforms:[]});await new Promise(resolve=>setImmediate(resolve))
  assert.equal(view.get('syncing'),false);assert.equal(view.get('communicationNotice'),undefined);assert.equal(view.get('reload'),0)
+})
+test('an incomplete platform sync shows a warning instead of a successful no-op summary',async()=>{
+ const view=fixture({},false,false,{rpc:async()=>({checked:2,matched:0,updated:0,platforms:[{platform:'boss',matched:0,status:'partial',scanned:21,unidentified:2,detail:'历史候选人的身份信息不完整'}]})})
+ button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
+ const toast=feedbackToast(view.render());assert.equal(toast.props.role,'alert')
+ assert.match(text(toast),/同步尚未完成/);assert.match(text(toast),/已读取 21 条平台记录/)
+ assert.doesNotMatch(text(toast),/本次核对 2 位候选人/)
+ assert.equal(view.get('reload'),1)
+})
+test('sync passes the displayed round and reports legacy skips separately from execution errors',async()=>{
+ const view=fixture({roundId:'chosen-round'},false,false,{rpc:async()=>({checked:5,matched:1,updated:0,platforms:[{platform:'liepin',matched:1,status:'completed',scanned:100,unidentified:3,detail:'已跳过 3 条缺少平台 ID 的历史记录'}]})})
+ button(view.render(),'同步平台简历').props.onClick();await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(view.requests[0][1].roundId,'chosen-round')
+ const toast=feedbackToast(view.render());assert.equal(toast.props.role,'status')
+ assert.match(text(toast),/可关联记录同步完成.*核对 2 位候选人.*另跳过 3 条/)
+ assert.doesNotMatch(text(toast),/同步尚未完成/)
 })
 function noticeClock(){
  let now=0,sequence=0;const timers=new Map()
@@ -292,6 +354,7 @@ test('workbench greeting defaults on and an explicit opt-out is sent unchanged w
  const view=fixture({view:'requirements'},false,false,{state:{jobs:[]}})
  const setting=find(view.render(),row=>row.props.className==='air-auto-greet')
  const checkbox=find(setting,row=>row.type==='input')
+ assert.equal(checkbox.props.role,'switch')
  assert.equal(checkbox.props.checked,true)
  checkbox.props.onChange({target:{checked:false}})
  button(view.render(),'开始寻聘').props.onClick()
@@ -300,10 +363,35 @@ test('workbench greeting defaults on and an explicit opt-out is sent unchanged w
  assert.equal(enabled.starts[0].autoGreet,true)
 })
 
+test('per-platform targets accept 100 in both layouts and reject values outside 1 to 100',()=>{
+ for(const compact of [false,true]){
+  const view=fixture({view:'requirements'},false,compact,{state:{jobs:[]}})
+  const input=()=>find(view.render(),row=>row.props.id==='air-sourcing-limit')
+  assert.equal(input().props.min,1);assert.equal(input().props.max,100)
+  for(const limit of [1,51,100]){
+   input().props.onChange({target:{value:String(limit)}})
+   assert.equal(input().props['aria-invalid'],false)
+   assert.equal(view.requests.at(-1)[1].settings.limit,limit)
+   button(view.render(),'开始寻聘').props.onClick()
+   assert.equal(view.starts.at(-1).limit,limit)
+   view.set('view','requirements')
+  }
+  assert.match(text(view.render()),/100 人.*账号封控/)
+  const saved=view.requests.length
+  for(const value of ['0','101','1.5','']){
+   input().props.onChange({target:{value}})
+   assert.equal(input().props['aria-invalid'],true)
+   assert.equal(button(find(view.render(),row=>row.props.title==='寻聘设置'),'开始寻聘').props.disabled,true)
+  }
+  assert.equal(view.requests.length,saved,'invalid input must not overwrite the saved target')
+ }
+})
+
 test('settings accept a minimum score and candidate lists retain results accepted under each execution threshold',()=>{
  const view=fixture({view:'requirements'},false,false,{state:{jobs:[]}})
  const input=()=>find(view.render(),row=>row.props.id==='air-sourcing-minimum-score')
  assert.equal(input().props.value,60)
+ assert.match(text(find(view.render(),row=>row.props.id==='air-sourcing-minimum-score-help')),/百分制（0–100 分）/)
  input().props.onChange({target:{value:'30'}});button(view.render(),'开始寻聘').props.onClick()
  assert.equal(view.starts[0].minimumScore,30)
  view.set('view','requirements');input().props.onChange({target:{value:''}})

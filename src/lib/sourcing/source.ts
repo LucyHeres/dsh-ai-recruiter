@@ -4,6 +4,8 @@ import type { AgentBrowserCall } from '../agent-browser-tools.js'
 import type { AgentBrowserTools } from '../agent-browser-tools.js'
 import type { BrowserAgentSeed } from '../browser-agent.js'
 import { normalized } from '../page-actions.js'
+import { assertPlatformPageLogin } from '../platform-login.js'
+import type { Platform } from '../../shared/workbench.js'
 
 export const sourcingMode = (job: Pick<SourcingJob, 'sourceMode'>) => job.sourceMode ?? 'recommend'
 export function sourcingEntry(platform: RecruitmentPlatform, job: Pick<SourcingJob, 'sourceMode'>) {
@@ -26,13 +28,14 @@ export function assertRecommendationPage(page: any, entry: string, aliases: read
   if (!isSourcingDocument(page?.url, entry, aliases) || page?.isLoginPage) throw new Error('SOURCING_RECOMMENDATION_REQUIRED: 请进入人才推荐页并核对目标职位；本轮不会自动转到人才搜索')
 }
 /** A unique already-observed platform tab can return to the configured entry
- * without spending a model turn. Ambiguous tabs and authentication stay with
- * the agent; navigation failures are never blindly replayed here. */
-export async function bootstrapSourcing(broker: AgentBrowserTools, entry: string, recommendation: boolean, signal: AbortSignal, aliases: readonly string[] = []): Promise<BrowserAgentSeed[]> {
+ * without spending a model turn. Login pages end this attempt; ambiguous tabs
+ * stay with the agent and navigation failures are never blindly replayed. */
+export async function bootstrapSourcing(broker: AgentBrowserTools, entry: string, recommendation: boolean, signal: AbortSignal, aliases: readonly string[] = [], platform?: Platform): Promise<BrowserAgentSeed[]> {
   const seeds = await broker.bootstrap(undefined, signal, entry)
-  if (!recommendation) return seeds
   const page = broker.currentPage()
-  if (isSourcingEntry(page?.url, entry) || page?.frameId && isSourcingDocument(page.url, entry, aliases) || page?.isLoginPage) return seeds
+  assertPlatformPageLogin(page, platform)
+  if (!recommendation) return seeds
+  if (isSourcingEntry(page?.url, entry) || page?.frameId && isSourcingDocument(page.url, entry, aliases)) return seeds
   let name: string | undefined, args: Record<string, unknown> = {}
   if (page) {
     try {
@@ -47,7 +50,11 @@ export async function bootstrapSourcing(broker: AgentBrowserTools, entry: string
   }
   const tool = broker.tools.find(tool => tool.name === name)
   if (!tool) return seeds
-  return [...seeds.filter(seed => seed.name === 'browser_list_tabs'), { name: tool.name, args, value: await tool.execute(args, signal) }]
+  const value: any = await tool.execute(args, signal)
+  assertPlatformPageLogin(value?.output ?? value, platform)
+  assertPlatformPageLogin(value?.snapshot ?? value?.output?.snapshot, platform)
+  assertPlatformPageLogin(broker.currentPage(), platform)
+  return [...seeds.filter(seed => seed.name === 'browser_list_tabs'), { name: tool.name, args, value }]
 }
 /** Check the observed destination before dispatch, including AI recovery. A
  * fallback changes navigation ownership, never the authorized source. */

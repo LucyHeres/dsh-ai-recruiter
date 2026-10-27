@@ -2,12 +2,13 @@ import { z } from 'zod'
 import { Store, hash } from './store.js'
 import { PLATFORM_KEYS } from '../shared/workbench.js'
 import type { SourcingJob } from '../shared/sourcing.js'
-import { defaultSourcingSettings, type SourcingSettings } from '../shared/sourcing-settings.js'
+import { defaultSourcingSettings, SOURCING_MAX_LIMIT, type SourcingSettings } from '../shared/sourcing-settings.js'
 
 export const sourcingSettingsPatchSpec = z.object({
   supplement: z.string().max(4000).optional(),
+  jobDescription: z.string().max(20000).optional(),
   platforms: z.array(z.enum(PLATFORM_KEYS)).max(PLATFORM_KEYS.length).optional(),
-  limit: z.number().int().min(1).max(50).optional(),
+  limit: z.number().int().min(1).max(SOURCING_MAX_LIMIT).optional(),
   minimumScore: z.number().int().min(0).max(100).optional(),
   autoGreet: z.boolean().optional(),
 }).strict()

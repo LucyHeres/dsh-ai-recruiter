@@ -7,6 +7,29 @@ type Call = (tool: string, args?: Record<string, unknown>, signal?: AbortSignal)
 
 const STALE_EXTENSION = '浏览器扩展连接已失效：请在 Chrome 打开 chrome://extensions，重新加载「薪招」扩展（或重启 Chrome）后重试'
 
+export class PlatformLoginRequiredError extends Error {
+  readonly code = 'PLATFORM_LOGIN_REQUIRED'
+  constructor(platform?: Platform, action = '开始寻聘') {
+    super(`${platform ? PLATFORMS[platform].label : '招聘平台'}需要登录或验证，请在保留的页面中完成后，手动再次点击“${action}”。`)
+    this.name = 'PlatformLoginRequiredError'
+  }
+}
+export const isPlatformLoginRequired = (error: unknown) => error instanceof PlatformLoginRequiredError
+  || (error as { code?: unknown })?.code === 'PLATFORM_LOGIN_REQUIRED'
+
+export function platformPageNeedsLogin(page: any): boolean {
+  if (page?.isLoginPage) return true
+  for (const value of [page?.url, page?.frameUrl]) try {
+    const url = new URL(value)
+    if (/^(?:login|passport)\./i.test(url.hostname)
+      || /\/(?:login|passport|verify|verification|captcha)(?:[/.]|$)/i.test(url.pathname)) return true
+  } catch { /* No observed URL. */ }
+  return false
+}
+export function assertPlatformPageLogin(page: any, platform?: Platform, action = '开始寻聘') {
+  if (platformPageNeedsLogin(page)) throw new PlatformLoginRequiredError(platform, action)
+}
+
 /** 扩展的 service worker 被 Chrome 挂起后，网关会返回 PLUGIN_TOOL_PIPELINE_ERROR。 */
 const isPipelineError = (error: unknown) =>
   /PLUGIN_TOOL_PIPELINE_ERROR/.test(String((error as { message?: unknown } | undefined)?.message ?? error ?? ''))
@@ -43,6 +66,16 @@ async function detectByChannelSession(call: Call, platform: Platform, signal?: A
   }
 }
 
+/** A logged-out start is a finished attempt. Opening a login page must never
+ * turn into an automatic continuation after the user signs in. */
+export async function assertPlatformTaskLogin(call: Call, platform: Platform, action: string, signal?: AbortSignal) {
+  const session = await detectByChannelSession(call, platform, signal)
+  if (session?.status !== 'logged_out') return
+  const policy = { allowedOrigins: [...PLATFORMS[platform].origins], riskLevel: 'browser_mutation' }
+  if (!await findPlatformTab(call, platform, policy, signal)) await openPlatformTab(call, platform, policy, signal)
+  throw new PlatformLoginRequiredError(platform, action)
+}
+
 /**
  * 判定平台登录状态。
  *
@@ -55,6 +88,7 @@ export async function detectPlatformLogin(call: Call, platform: Platform, open: 
   const policy = { allowedOrigins: [...PLATFORMS[platform].origins], riskLevel: 'browser_mutation' }
   let tabId: number | undefined
   let owned = false
+  let confirmedLoggedIn = false
   try {
     // 「去登录」需要把平台页面呈现给用户，故只走页签路径。
     if (!open) {
@@ -77,8 +111,12 @@ export async function detectPlatformLogin(call: Call, platform: Platform, open: 
       signal?.throwIfAborted()
       const page = await call('browser_snapshot', { tabId, viewportOnly: true, policy }, signal)
       const text = String(page.text ?? '')
-      if (page.isLoginPage) return { status: 'logged_out', detail: '当前平台未登录，请完成登录后刷新' }
-      if (text.trim() && classify) return await classify(page, platform, signal)
+      if (platformPageNeedsLogin(page)) return { status: 'logged_out', detail: '当前平台未登录，请完成登录后刷新' }
+      if (text.trim() && classify) {
+        const result = await classify(page, platform, signal)
+        confirmedLoggedIn = result.status === 'logged_in'
+        return result
+      }
       await delay(500, undefined, { signal })
     }
     return { status: 'unknown', detail: '页面未提供明确登录状态，请打开平台完成加载或验证后刷新' }
@@ -87,7 +125,8 @@ export async function detectPlatformLogin(call: Call, platform: Platform, open: 
     if (isPipelineError(error)) throw new Error(STALE_EXTENSION)
     throw error
   } finally {
-    // 只关闭本次探测新开的页面；用户自己的页签永远保留。
-    if (tabId && owned && !open) await call('browser_close_tab', { tabId, policy }).catch(() => undefined)
+    // Login, verification, unknown and interrupted pages are handed to the user.
+    // Only an unambiguously logged-in temporary probe can be reclaimed.
+    if (tabId && owned && !open && confirmedLoggedIn) await call('browser_close_tab', { tabId, policy }).catch(() => undefined)
   }
 }

@@ -1,13 +1,11 @@
 import type { WorkbenchState } from './workbench.js'
 
-/** A connection reservation is not evidence that a recruitment task is running. */
-export function browserConnectionStatus(state: WorkbenchState | undefined, busy: string, error: string): string {
-  if (error) return '读取失败'
-  if (busy === '连接中') return '连接中'
-  if (!state) return '读取中'
-  const connection = state.connection
-  const task = state.jobs.find(job => job.id === state.activeJobId)
-  if (connection.activeWorkflow || task && ['running', 'stopping'].includes(task.status)) return '工作中'
-  if (connection.connecting) return '连接中'
-  return connection.ready && (connection.available || connection.requiresBegin) ? '已连接' : '未连接'
+export const EXTENSION_REQUIRED_CODE = 'BROWSER_EXTENSION_NOT_INSTALLED'
+export const EXTENSION_MISSING_MESSAGE = '尚未安装【薪招】浏览器扩展'
+export const EXTENSION_DESCRIPTION = '浏览器扩展可以为插件提供招聘平台的自动化访问与操作能力。'
+export const isExtensionRequired = (error: unknown) => String(error instanceof Error ? error.message : error).includes(EXTENSION_REQUIRED_CODE)
+
+/** 连接状态只反映扩展是否就绪，不随任务占用或连接进度变化。 */
+export function browserConnectionStatus(state: WorkbenchState | undefined, error: string): '已连接' | '未连接' {
+  return !error && state?.extensionInstallation?.status !== 'not_installed' && state?.connection.ready ? '已连接' : '未连接'
 }

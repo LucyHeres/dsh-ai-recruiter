@@ -5,7 +5,7 @@ import type { DeveloperLog } from './developer-log.js'
 import { Store } from './store.js'
 import { safeError } from './task-error.js'
 import { sourcingSource, sourcingStartSpec, sourcingVersion, validateCriteria, validateSupplementCoverage } from './sourcing-policy.js'
-import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, type Platform, type WorkbenchJob } from '../shared/workbench.js'
+import { PLATFORMS, type Platform, type WorkbenchJob } from '../shared/workbench.js'
 import type { SourcingJob, SourcingPosition, SourcingRequirements } from '../shared/sourcing.js'
 import { sourcingTotalTarget, sourcingQualifiedCount } from '../shared/sourcing-score.js'
 import { deriveSourcingSearchFilters } from './sourcing-search.js'
@@ -16,6 +16,8 @@ import { sourcingEntry, sourcingMode } from './sourcing/source.js'
 import { recruitmentPlatform } from './platforms/registry.js'
 import { validateListCriteria } from './sourcing/list-screening.js'
 import { withFixedListCriteria } from './sourcing/requirement-policy.js'
+import { withSourcingJobDescription } from '../shared/sourcing-settings.js'
+import { assertPlatformTaskLogin } from './platform-login.js'
 
 const now = () => new Date().toISOString()
 
@@ -30,11 +32,12 @@ export class SourcingAgent {
   create(request: unknown): SourcingJob {
     const input = sourcingStartSpec.parse(request)
     return { kind: this.kind, id: input.id, jobId: input.jobId, platform: input.platforms[0], platforms: input.platforms,
+      ...(input.jobDescription === undefined ? {} : { jobDescription: input.jobDescription }),
       supplement: input.supplement, sourceMode: input.sourceMode, limit: input.limit, limitScope: 'per_platform', minimumScore: input.minimumScore, autoGreet: input.autoGreet, greetings: [], scanned: 0, skippedLowScore: 0, candidates: [], channels: input.platforms.map(platform => ({ platform, status: 'queued', detail: '尚未开始', candidateCount: 0, limit: input.limit })),
       status: 'queued', detail: '正在读取职位要求', results: [], events: [], createdAt: now(), updatedAt: now() }
   }
   async prepare(job: SourcingJob, signal: AbortSignal) {
-    job.position = await this.loadPosition(job.jobId, signal); job.jobName = job.position.name
+    job.position = withSourcingJobDescription(await this.loadPosition(job.jobId, signal), job.jobDescription); job.jobName = job.position.name
     const available = job.position.publishedChannels ? sourcingPlatformsForChannels(job.position.publishedChannels) : job.position.platforms ?? []
     const unavailable = job.platforms.filter(platform => !available.includes(platform))
     if (unavailable.length) throw new Error(`SOURCING_PLATFORM_NOT_CONNECTED: 当前职位尚未对接同步${unavailable.map(platform => PLATFORMS[platform].label).join('、')}，请先在薪人薪事同步职位后刷新再试`)
@@ -74,7 +77,7 @@ export class SourcingAgent {
         // BOSS has no online detail page: its list card is the final source,
         // so those summary results stay in the cross-round duplicate set.
         const previous = new Set(history.flatMap(row => row.candidates ?? []).filter(row => row.scope !== 'summary' || row.platform === 'boss').flatMap(row => [row.key, ...(row.identityAliases ?? [])]))
-        await this.progress(job, 'connecting', `正在确认浏览器连接，未连接时将自动连接（最长 ${ENSURE_TIMEOUT_SECONDS} 秒）`)
+        await this.progress(job, 'connecting', '正在连接浏览器…')
         await this.begin(signal); owned = true; job.status = 'running'
         for (const channel of job.channels) {
           signal.throwIfAborted()
@@ -85,6 +88,7 @@ export class SourcingAgent {
           const quota = job.limitScope === 'per_platform' ? job.limit : Math.ceil((job.limit - sourcingQualifiedCount(job)) / job.channels.filter(row => row.status === 'queued' || row === channel).length)
           channel.limit = quota
           const before = sourcingQualifiedCount(job)
+          await assertPlatformTaskLogin(this.call, channel.platform, '开始寻聘', signal)
           const session = await createSourcingSession({ job, channel, quota, before, previous, signal, agent,
             store: this.store, call: this.call, listTools: this.listTools, logger: this.logger, greetingPolicy: this.options.greetingPolicy,
             save: job => this.save(job), progress: (job, phase, message) => this.progress(job, phase, message) })

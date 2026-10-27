@@ -10,6 +10,7 @@ import { browserFailureCode } from '../browser-errors.js'
 import { sourcingMode } from './source.js'
 import { LIST_REQUIREMENTS_PROMPT } from './list-screening.js'
 import { matchingInstructions, requirementsGoal } from './matching-skill.js'
+import { assertPlatformPageLogin, isPlatformLoginRequired } from '../platform-login.js'
 
 /** Platform code runs first. Navigation inference starts only at an unexpected
  * state and yields back to the same driver after recovery. Assessment models
@@ -57,7 +58,7 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
       inputRevision: context.broker.inputRevision,
       ...(context.broker.inputRevision === undefined ? { items: page?.items?.map((item: any) => [item.role, item.name, item.value, item.states]) } : {}) })
   }
-  const recoverable = (error: unknown) => !/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error))
+  const recoverable = (error: unknown) => !isPlatformLoginRequired(error) && !/OUTCOME_UNKNOWN|RESULT_UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error))
     && (error instanceof SourcingHandoff || recoverablePageError(error)
       || /^(?:SOURCING_|SEARCH_CONDITIONS_UNVERIFIED|SEMANTIC_DETAILS_UNAVAILABLE)/.test(error instanceof Error ? error.message : ''))
   const collection: BrowserAgentTool = {
@@ -94,6 +95,7 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
       const execute = (name: string, input: Record<string, unknown>) => executeOperation(name, input, signal)
       if (Object.keys(args).length) throw new Error('SOURCING_ARGUMENT_INVALID: sourcing_collect 不接受额外参数')
       signal.throwIfAborted()
+      assertPlatformPageLogin(context.broker.currentPage())
       if (failedState === stateKey()) throw new SourcingHandoff('collection_state_unchanged')
       if (!driver) throw new SourcingHandoff('platform_driver_missing')
       try {

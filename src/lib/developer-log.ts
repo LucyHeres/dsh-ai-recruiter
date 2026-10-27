@@ -149,6 +149,11 @@ export class DeveloperLog {
     })
   }
   async flush() { await this.queue }
+  async clear() {
+    const clear = this.queue.then(async () => { for (let index = 0; index < FILES; index++) await rm(this.path(index), { force: true }) })
+    this.queue = clear.then(() => {}, () => {})
+    return clear
+  }
   private path(index: number) { return join(this.directory, index ? `developer.${index}.jsonl` : 'developer.jsonl') }
   async read(taskId?: string, limit = 300) {
     // 与写入共用队列，导出期间不轮转，避免跨文件读取时重复或遗漏记录。

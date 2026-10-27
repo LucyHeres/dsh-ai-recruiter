@@ -2,7 +2,7 @@
 
 ## 用户只需安装两部分
 
-1. 从[薪招正式安装页](https://s.xinrenxinshi.com/recruitment/xin-get)安装或更新薪招 Chrome 扩展，保持启用。固定 ID 为 `elbamdfkepfcainfggecfjhahpjjdmdg`；新版包含 Native Messaging 权限。如 Chrome 因新增权限暂停扩展，请按浏览器提示重新启用。
+1. 下载当前使用的[薪招本地测试包 v3.2.46](https://xinrenxinshi.oss-cn-beijing.aliyuncs.com/xinzhao/xinzhao_%E6%9C%AC%E5%9C%B0%E6%B5%8B%E8%AF%95%E7%89%88_v3.2.46.zip)，安装或更新薪招 Chrome 扩展，保持启用。上线前将替换为线上正式包。固定 ID 为 `elbamdfkepfcainfggecfjhahpjjdmdg`；新版包含 Native Messaging 权限。如 Chrome 因新增权限暂停扩展，请按浏览器提示重新启用。
 2. 在当前薪灵客户端的插件管理入口，从运营方提供的 npm 版本或 HTTPS 安装包地址安装 dsh-ai-recruiter，按客户端要求重启。
 3. 打开已登录的目标网页，直接在 DSH 提出任务，例如「读取当前网页上的候选人信息」。本机桥接就绪后会主动通知扩展连接，界面显示「已连接」后即可使用。
 
@@ -45,6 +45,6 @@ DSH 插件与 Chrome 扩展分别升级。插件卸载/停用时撤销本次注�
 
 ## 工作台扩展安装检测（0.1.51）
 
-顶部卡片单独显示扩展安装状态。未检测到时点击“去安装薪招”，入口为正式环境 https://s.xinrenxinshi.com/recruitment/xin-get；安装并启用后点击“重新检测”，再“连接浏览器”。无法确认时也提供安装指引，并保留连接按钮。
+顶部卡片单独显示扩展安装状态。未检测到时点击“去安装薪招”，当前下载薪招本地测试包 v3.2.46，上线前将替换为线上正式包；安装并启用后点击“重新检测”，再“连接浏览器”。无法确认时也提供安装指引，并保留连接按钮。
 
 扩展已认证连接时直接确认安装；未连接时只读 Chrome、Chromium、Edge 默认用户目录及浏览器配置中的扩展记录，每 15 秒更新一次，手动重检刷新缓存。已安装与已连接分开显示，停用或尚未连接不判为未安装。自定义目录、权限限制或配置异常可能无法确认；在其他浏览器配置安装时需使用该配置连接。检测不会修改浏览器设置。

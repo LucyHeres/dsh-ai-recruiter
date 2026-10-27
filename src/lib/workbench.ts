@@ -14,8 +14,9 @@ import { hostBrowserAgent, type BrowserAgentModelConfig } from './host-browser-a
 import { hostLoginClassifier } from './login-planner.js'
 import { safeError } from './task-error.js'
 import { logError, type DeveloperLog } from './developer-log.js'
-import { detectPlatformLogin } from './platform-login.js'
+import { detectPlatformLogin, assertPlatformTaskLogin, isPlatformLoginRequired } from './platform-login.js'
 import { ExtensionInstallationDetector } from './extension-installation.js'
+import { EXTENSION_REQUIRED_CODE } from '../shared/connection-status.js'
 import type { ResumeImport } from './resume-import.js'
 import type { WorkbenchTaskExecutor } from './task-executor.js'
 import { candidateCommunication, communicationIndex, sourcingResults, taskHistoryPage } from './sourcing-review.js'
@@ -25,7 +26,9 @@ import { AgentBrowserTools } from './agent-browser-tools.js'
 import { candidateContactKeys, candidateResumeReceipt, readCandidateContacts } from './candidate-contact.js'
 import { assertCommunicationRead, syncPlatformCommunication } from './communication-sync.js'
 import { recruitmentPlatform } from './platforms/registry.js'
-import { candidateAttachments, receivedResumes, selectReceivedResumes, cachedReceivedFile } from './received-resume-store.js'
+import { candidateAttachments, receivedResumes, selectReceivedResumes, receivedResumeStorage, clearReceivedResumeCache } from './received-resume-store.js'
+import { ReceivedResumeDownloads } from './received-resume-download.js'
+import { dataStorage, clearData } from './data-management.js'
 import type { BrowserAgentRunner } from './host-browser-agent.js'
 import type { CommunicationSyncResult, SourcingCandidate, SourcingJob, SourcingPosition } from '../shared/sourcing.js'
 import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, PLATFORM_KEYS, TASK_FEATURES, type Platform, type TaskKind, type ConnectionState, type GreetingJob, type JobOption, type WorkbenchJob, type WorkbenchState } from '../shared/workbench.js'
@@ -43,6 +46,8 @@ export class Workbench extends TypertRemoteService {
   private initialized?: Promise<void>
   private statusRead?: Promise<ConnectionState>
   private connecting = false
+  private resumeDownloads?: ReceivedResumeDownloads
+  private readonly fileLifetime = new AbortController()
   private readonly extensionDetector = new ExtensionInstallationDetector()
   private readonly greetingConfig: GreetingPolicy
   private readonly classifyLogin: ReturnType<typeof hostLoginClassifier>
@@ -61,6 +66,8 @@ export class Workbench extends TypertRemoteService {
     this.registerTask(resume)
     ctx.effect(() => async () => {
       this.disposed = true
+      this.fileLifetime.abort()
+      this.resumeDownloads?.dispose()
       this.active?.controller.abort()
       await this.active?.task
     })
@@ -72,10 +79,10 @@ export class Workbench extends TypertRemoteService {
     if (!executor.storagePrefix || [...this.executors.values()].some(existing => existing.storagePrefix.startsWith(executor.storagePrefix) || executor.storagePrefix.startsWith(existing.storagePrefix))) throw new Error('任务记录前缀必须独立')
     this.executors.set(executor.kind, executor)
   }
-  private async listJobs(): Promise<WorkbenchJob[]> {
+  private async listJobs(includeCleared = false): Promise<WorkbenchJob[]> {
     const groups = await Promise.all([...this.executors.values()].map(async executor =>
       (await this.store.list<WorkbenchJob>(executor.storagePrefix))
-        .filter(job => !!job.id && Array.isArray(job.results))
+        .filter(job => !!job.id && Array.isArray(job.results) && (includeCleared || !job.historyCleared))
         .map(job => ({ ...job, kind: executor.kind }))))
     return groups.flat()
   }
@@ -153,14 +160,14 @@ export class Workbench extends TypertRemoteService {
   @Remote
   async positionOverview() {
     await this.initialize()
-    const [options, tasks] = await Promise.all([this.loadJobOptions(), this.listJobs()])
+    const [options, tasks] = await Promise.all([this.loadJobOptions(), this.listJobs(true)])
     return positionOverview(options, tasks, this.active?.id)
   }
   @Remote
   async sourcingHistory(request: unknown) {
     const { jobId } = z.object({ jobId: z.string().min(1).max(64) }).strict().parse(request)
     await this.initialize()
-    return (await this.store.list<SourcingJob>('sourcing-')).filter(job => job.kind === 'talent_sourcing' && job.jobId === jobId)
+    return (await this.store.list<SourcingJob>('sourcing-')).filter(job => job.kind === 'talent_sourcing' && job.jobId === jobId && !job.talentCleared)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50).map(({ candidates, ...job }) => ({ ...job, candidateCount: sourcingQualifiedCount({ ...job, candidates }) }))
   }
   @Remote
@@ -191,15 +198,42 @@ export class Workbench extends TypertRemoteService {
     return { jobId, roundId: id, candidate: { ...candidate, communication: candidateCommunication(candidate, communications), ...candidateResumeReceipt(candidate, contacts), resumeAttachments: candidateAttachments(candidate, jobId, attachments) }, position: job.position, requirements: job.requirements, supplement: job.supplement }
   }
   @Remote
-  async downloadReceivedResume(request: unknown): Promise<import('../shared/sourcing.js').ResumeDownloadChunk> {
-    const { jobId, roundId, key, attachmentId, offset } = z.object({ jobId: z.string().min(1).max(64), roundId: idSpec,
-      key: z.string().regex(/^[a-f0-9]{64}$/), attachmentId: z.string().regex(/^[a-f0-9]{64}$/), offset: z.number().int().min(0).max(20 * 1024 * 1024).default(0) }).strict().parse(request)
+  async downloadReceivedResume(request: unknown, requestedSignal?: AbortSignal): Promise<import('../shared/sourcing.js').ResumeDownloadChunk> {
+    const { jobId, roundId, key, attachmentId, offset, downloadId } = z.object({ jobId: z.string().min(1).max(64), roundId: idSpec,
+      key: z.string().regex(/^[a-f0-9]{64}$/), attachmentId: z.string().regex(/^[a-f0-9]{64}$/),
+      offset: z.number().int().min(0).max(20 * 1024 * 1024).default(0), downloadId: idSpec.optional() }).strict().parse(request)
     const [row] = await selectReceivedResumes(this.store, jobId, roundId, [attachmentId], key)
-    const file = await cachedReceivedFile(this.store, row)
-    if (!file) throw new Error('附件尚未取得或已失效，请先同步平台简历')
-    if (offset >= file.blob.size) throw new Error('附件读取位置无效')
-    const bytes = Buffer.from(await file.blob.slice(offset, offset + 96 * 1024).arrayBuffer())
-    return { fileName: file.fileName, mimeType: file.blob.type, totalSize: file.blob.size, offset, base64: bytes.toString('base64'), eof: offset + bytes.length === file.blob.size }
+    const signal = AbortSignal.any([AbortSignal.timeout(180000), ...(requestedSignal ? [requestedSignal] : []), ...(this.fileLifetime ? [this.fileLifetime.signal] : [])])
+    signal.throwIfAborted()
+    this.resumeDownloads ??= new ReceivedResumeDownloads()
+    return this.resumeDownloads.read(JSON.stringify([jobId, roundId, key, attachmentId]), offset, downloadId, async () => {
+      const release = this.reserve()
+      try { return await this.store.locked('workbench-browser', () => this.resume.receivedFile(row, signal)) }
+      finally { release() }
+    })
+  }
+  @Remote
+  async resumeStorage() { return receivedResumeStorage(this.store) }
+  @Remote
+  async dataStorage() { return dataStorage(this.store) }
+  @Remote
+  async clearData(request: unknown) {
+    const { group } = z.object({ group: z.enum(['tasks', 'talents']), confirmed: z.literal(true) }).strict().parse(request)
+    await this.initialize()
+    const release = this.reserve()
+    try {
+      return await this.store.locked('workbench-browser', () => clearData(this.store, group, async () => {
+        if (!this.logger) throw new Error('开发日志服务未初始化，无法清理任务日志')
+        await this.logger.clear()
+      }))
+    } finally { release() }
+  }
+  @Remote
+  async clearResumeCache(request: unknown) {
+    z.object({ confirmed: z.literal(true) }).strict().parse(request)
+    const release = this.reserve()
+    try { return await this.store.locked('workbench-browser', () => clearReceivedResumeCache(this.store)) }
+    finally { release() }
   }
   @Remote
   async uploadReceivedResumes(request: unknown) {
@@ -211,14 +245,16 @@ export class Workbench extends TypertRemoteService {
   }
   @Remote
   async syncCommunication(request: unknown, requestedSignal?: AbortSignal): Promise<CommunicationSyncResult> {
-    const { jobId } = z.object({ jobId: z.string().min(1).max(64) }).strict().parse(request)
+    const { jobId, roundId } = z.object({ jobId: z.string().min(1).max(64), roundId: z.union([z.literal('all'), idSpec]).default('all') }).strict().parse(request)
     await this.initialize()
     const release = this.reserve(); let owned = false
     const signal = requestedSignal ? AbortSignal.any([requestedSignal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000)
     try {
       const [jobs, greetings, contacts] = await Promise.all([this.store.list<SourcingJob>('sourcing-'), greetingHistory(this.store), readCandidateContacts(this.store)])
       const index = communicationIndex(greetings, contacts), candidates = new Map<string, SourcingCandidate>()
+      const visible = new Set(sourcingResults(jobs, jobId, roundId, index, contacts).candidates.map(row => `${row.roundId}:${row.key}`))
       for (const job of jobs.filter(job => job.jobId === jobId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))) for (const candidate of job.candidates) {
+        if (!visible.has(`${job.id}:${candidate.key}`)) continue
         const key = candidateContactKeys(candidate)[0]!
         if (!candidates.has(key)) candidates.set(key, { ...candidate, communication: candidateCommunication(candidate, index), ...candidateResumeReceipt(candidate, contacts) })
       }
@@ -235,17 +271,20 @@ export class Workbench extends TypertRemoteService {
           observationFormat: 'dom', observationViewportOnly: true, observationWait: 'none', logger: this.logger })
         broker.setBeforeCall(async call => { assertCommunicationRead(call, broker.currentPage()) })
         try {
+          await assertPlatformTaskLogin((tool, args, checkSignal) => this.call(tool, args, checkSignal), platform, '同步平台简历', signal)
           const synced = sync?.sync ? await sync.sync(broker, [...candidates.values()], this.store, signal)
             : await syncPlatformCommunication(broker, platform, [...candidates.values()], this.store, signal)
           result.matched += synced.matched; result.updated += synced.updated
-          result.platforms.push({ platform, matched: synced.matched, detail: synced.detail })
+          result.platforms.push({ platform, matched: synced.matched, detail: synced.detail, status: synced.status, scanned: synced.scanned, unidentified: synced.unidentified })
         } catch (error) {
           signal.throwIfAborted()
           if (/OUTCOME_UNKNOWN|RESULT_UNKNOWN/.test(String(error))) throw error
-          result.platforms.push({ platform, matched: 0, detail: safeError(error) })
+          result.platforms.push({ platform, matched: 0, detail: safeError(error), status: 'failed' })
+          if (isPlatformLoginRequired(error)) break
         }
       }
-      this.logger?.write('info', 'communication.synced', { checked: result.checked, matched: result.matched, updated: result.updated })
+      this.logger?.write('info', 'communication.synced', { checked: result.checked, matched: result.matched, updated: result.updated,
+        platforms: result.platforms.map(({ platform, status, scanned, unidentified }) => ({ platform, status, scanned, unidentified })) })
       return result
     } finally { try { if (owned) await this.call('browser_finish') } finally { release() } }
   }
@@ -290,9 +329,10 @@ export class Workbench extends TypertRemoteService {
   @Remote
   async state(): Promise<WorkbenchState> {
     await this.initialize()
-    const jobs = (await this.listJobs()).map(job => job.kind === 'talent_sourcing' ? { ...job, candidates: [] } : job)
+    const allJobs = await this.listJobs(true)
+    const jobs = allJobs.filter(job => !job.historyCleared).map(job => job.kind === 'talent_sourcing' ? { ...job, candidates: [] } : job)
     const connection = await this.connection()
-    return { features: TASK_FEATURES.map(feature => ({ ...feature, available: this.executors.has(feature.kind) })), connection, extensionInstallation: await this.extensionDetector.read(connection.connected && connection.authenticated), jobs: jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30), activeJobId: this.active?.id ?? null, nativeConnection: this.native(), dailyUsage: dailyUsage(jobs), dailyLimit: this.greetingConfig.dailyLimit }
+    return { features: TASK_FEATURES.map(feature => ({ ...feature, available: this.executors.has(feature.kind) })), connection, extensionInstallation: await this.extensionDetector.read(connection.connected && connection.authenticated), jobs: jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30), activeJobId: this.active?.id ?? null, nativeConnection: this.native(), dailyUsage: dailyUsage(allJobs), dailyLimit: this.greetingConfig.dailyLimit }
   }
   @Remote
   async checkExtension(request: unknown) {
@@ -307,6 +347,7 @@ export class Workbench extends TypertRemoteService {
     finally { release() }
   }
   private async ensureConnection(signal?: AbortSignal, timeoutMs = (ENSURE_TIMEOUT_SECONDS + 5) * 1000) {
+    await this.assertExtensionInstalled(signal)
     const deadline = AbortSignal.timeout(timeoutMs)
     const connectionSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
     this.connecting = true
@@ -316,10 +357,19 @@ export class Workbench extends TypertRemoteService {
       throw error
     } finally { this.connecting = false }
   }
+  private async assertExtensionInstalled(signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const connection = await this.connection()
+    const installation = await this.extensionDetector.read(connection.connected && connection.authenticated, true)
+    signal?.throwIfAborted()
+    if (this.disposed) throw new Error('插件已卸载')
+    if (installation.status === 'not_installed') throw new Error(`${EXTENSION_REQUIRED_CODE}: 尚未安装薪招浏览器扩展，请先安装后再开始任务。`)
+  }
   @Remote
   async pair(signal?: AbortSignal) {
     const release = this.reserve()
     try {
+      await this.assertExtensionInstalled(signal)
       const raw = await this.call('browser_setup', {}, signal)
       const link = new URL(raw.pairingUrl)
       if (link.protocol !== 'http:' || link.hostname !== '127.0.0.1' || link.pathname !== '/xinzhao-pair') throw new Error('备用配对链接无效，请检查网关配置')
@@ -332,6 +382,15 @@ export class Workbench extends TypertRemoteService {
     const state = await this.connection()
     if (!state.ready || (!state.available && !state.requiresBegin) || state.activeWorkflow || state.executionOwner === 'remote') throw new Error('BROWSER_AGENT_BUSY: 浏览器未就绪或已有任务持有执行权')
     await this.call('browser_begin', {}, signal)
+  }
+  /** Standalone discovery must not leave an implicit workflow locking the drawer.
+   * An existing workflow still owns its lifetime, including any probes. */
+  async browserProbe<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const state = await this.connection()
+    if (state.activeWorkflow) return read()
+    await this.begin(signal)
+    try { return await read() }
+    finally { await this.call('browser_finish') }
   }
   @Remote
   async tabs(request: unknown, signal?: AbortSignal) {
@@ -411,9 +470,10 @@ export class Workbench extends TypertRemoteService {
     const release = this.reserve()
     const controller = new AbortController()
     const active = { id: job.id, controller, task: undefined as Promise<void> | undefined }
-    this.active = active
-
     try {
+      // Reject missing prerequisites before accepting, preparing or saving a new task.
+      if (!(job.kind === 'resume_import' && job.resumeSource === 'platform_received')) await this.assertExtensionInstalled(controller.signal)
+      this.active = active
       this.logger?.write('info', 'task.accepted', { taskId: job.id, kind, platform: job.platform, limit: job.limit })
       if (job.kind === 'talent_sourcing') await this.sourcing!.prepare(job as SourcingJob, controller.signal)
       if (job.kind === 'greeting' && (job as GreetingJob).jobId) {

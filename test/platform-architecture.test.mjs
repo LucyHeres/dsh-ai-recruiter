@@ -78,4 +78,8 @@ test('沟通同步按能力选择实现，未声明专有同步的平台仍走�
   for (const platform of PLATFORM_KEYS) {
     assert.ok(platformDefinition(platform).communication, `${platform} 必须有通用读取所需的页面语义`)
   }
+  assert.deepEqual(platformDefinition('liepin').communication.entries, ['https://lpt.liepin.com/chat/im'])
+  assert.deepEqual(platformDefinition('liepin').communication.filters.resume_received, ['有简历'])
+  assert.deepEqual(platformDefinition('boss').communication.entries, ['https://www.zhipin.com/web/chat/index'])
+  assert.deepEqual(platformDefinition('boss').communication.filters.resume_received, ['已获取简历'])
 })

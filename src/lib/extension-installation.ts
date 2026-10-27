@@ -28,9 +28,9 @@ async function readJson(file: string): Promise<{ value?: any; failed?: boolean }
 }
 
 /** Read installation metadata only; never expose profile paths or preference contents. */
-async function detect(): Promise<ExtensionInstallation> {
+async function detect(directories: readonly string[]): Promise<ExtensionInstallation> {
   let readable = false, failed = false
-  for (const directory of browserDirectories()) {
+  for (const directory of directories) {
     const local = await readJson(join(directory, 'Local State'))
     failed ||= !!local.failed
     if (!local.value) continue
@@ -58,13 +58,14 @@ async function detect(): Promise<ExtensionInstallation> {
 }
 
 export class ExtensionInstallationDetector {
+  constructor(private readonly directories: readonly string[] = browserDirectories()) {}
   private cached?: { value: ExtensionInstallation; until: number }
   private inFlight?: Promise<ExtensionInstallation>
   async read(connected: boolean, refresh = false): Promise<ExtensionInstallation> {
     if (connected) return result('installed', '薪招扩展已安装并连接。', 'connection')
     if (refresh) this.cached = undefined
     if (this.cached && this.cached.until > Date.now()) return this.cached.value
-    this.inFlight ??= detect().then(value => { this.cached = { value, until: Date.now() + 15000 }; return value })
+    this.inFlight ??= detect(this.directories).then(value => { this.cached = { value, until: Date.now() + 15000 }; return value })
     try { return await this.inFlight } finally { this.inFlight = undefined }
   }
 }

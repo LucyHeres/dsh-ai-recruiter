@@ -55,7 +55,10 @@ export interface SourcingCandidate {
   listAssessments?: SourcingListAssessment[]
 }
 export interface SourcingJob extends WorkbenchJob {
+  talentCleared?: boolean
+  clearedCandidateCount?: number
   kind: 'talent_sourcing'; jobId: string; position?: SourcingPosition; supplement: string
+  jobDescription?: string
   platforms: Platform[]; sourceMode?: 'recommend' | 'search'; requirements?: SourcingRequirements; requirementVersion?: string
   limitScope?: 'per_platform'; searchFilters?: SourcingSearchFilters
   minimumScore?: number; autoGreet?: boolean; greetings?: SourcingGreeting[]; scanned?: number; skippedLowScore?: number; skippedByFilters?: number; skippedUnverified?: number
@@ -82,7 +85,7 @@ export interface SourcingCandidateDetail {
 
 export interface CommunicationSyncResult {
   checked: number; matched: number; updated: number
-  platforms: { platform: Platform; matched: number; detail: string }[]
+  platforms: { platform: Platform; matched: number; detail: string; status?: 'completed' | 'partial' | 'failed'; scanned?: number; unidentified?: number }[]
 }
 
 export interface ReceivedResumeAttachment {
@@ -94,8 +97,12 @@ export interface ReceivedResumeAttachment {
   uploadStopped?: boolean
 }
 export interface ResumeDownloadChunk {
+  downloadId: string
   fileName: string; mimeType: string; totalSize: number; offset: number; base64: string; eof: boolean
 }
+export interface ResumeStorageUsage { fileCount: number; bytes: number }
+export type DataGroup = 'tasks' | 'talents'
+export interface DataStorageUsage { tasks: { bytes: number }; talents: { bytes: number } }
 
 export interface SourcingGreeting extends TaskResult { candidateKey: string; platform: Platform; knownContacted?: boolean }
 export interface PositionOverview extends JobOption { candidateCount: number; greetedCount: number; resumeCount: number; importedCount: number; activeKind?: WorkbenchJob['kind'] }

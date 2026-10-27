@@ -15,6 +15,15 @@ export const bossDefinition: PlatformDefinition = {
   communication: {
     entries: ['https://www.zhipin.com/web/chat/index'],
     scope: page => new URL(page.url).pathname === '/web/chat/index' ? 'chat' : undefined,
+    filters: { all: ['全部'], greeted: [], resume_received: ['已获取简历'] },
+    recordSeed: item => item.role === 'span' && /^(?:\d{1,2}:\d{2}|\d{1,2}月\d{1,2}日|昨天|前天)$/.test(String(item.name).trim()),
+    identity: node => {
+      if (!String(node?.attributes?.class ?? '').split(/\s+/).includes('geek-item')) return []
+      // BOSS's observed contact wrapper is _<uid>-<friendSource>. Source 0
+      // identifies a candidate; unrelated widget IDs cannot identify a person.
+      const uid = /^_([1-9]\d{3,19})-0$/.exec(String(node.attributes.id ?? ''))?.[1]
+      return uid ? [`geek:${uid}`] : []
+    },
   },
   receivedResumes: { receivedPath: '/web/chat/index', requiredTab: '已获取简历', guidance: BOSS_RESUME_IMPORT_ROUTE },
 }

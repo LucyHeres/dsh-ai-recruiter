@@ -1,5 +1,7 @@
 import { hash, type Store } from './store.js'
-import { cachedReceivedFile, updateReceivedResume, type ReceivedResumeRecord } from './received-resume-store.js'
+import { updateReceivedResume, type ReceivedResumeRecord } from './received-resume-store.js'
+import { resumeFileFingerprint } from './received-resume-file.js'
+import type { CapturedFile } from './file-transfer.js'
 import type { RecruitEngine } from './recruit-engine.js'
 import type { ResumeOptions, TaskResult } from '../shared/workbench.js'
 import { safeError } from './task-error.js'
@@ -7,11 +9,13 @@ import { safeError } from './task-error.js'
 /** Stable across sourcing rounds, chat messages and batch tasks, but scoped to
  * this company's store, the target position, person and actual file content. */
 export const receivedIngestId = (jobId: string, row: ReceivedResumeRecord) => {
-  if (!row.cached) throw new Error('附件尚未取得，请先同步平台简历')
-  return `received_${hash([jobId, row.platform, row.conversationId, row.cached.sha256]).slice(0, 40)}`
+  const fingerprint = row.content ?? row.cached
+  if (!fingerprint) throw new Error('附件尚未取得，无法确认文件指纹')
+  return `received_${hash([jobId, row.platform, row.conversationId, fingerprint.sha256]).slice(0, 40)}`
 }
 export async function uploadReceivedFiles(input: { store: Store; engine: RecruitEngine; jobId: string; records: ReceivedResumeRecord[];
-  options: ResumeOptions; signal: AbortSignal; onResult: (result: TaskResult, index: number) => Promise<void> }) {
+  options: ResumeOptions; signal: AbortSignal; readFile: (row: ReceivedResumeRecord, signal: AbortSignal) => Promise<CapturedFile>;
+  onResult: (result: TaskResult, index: number) => Promise<void> }) {
   const { store, engine, jobId, records, options, signal, onResult } = input
   if (!options.jobs.some(j => j.id === jobId)) throw new Error('当前职位已失效或无入库权限')
   const destination = options.destinations.find(d => d.id === '1:10')
@@ -21,21 +25,43 @@ export async function uploadReceivedFiles(input: { store: Store; engine: Recruit
   let stopped = false
   for (const [index, row] of records.entries()) {
     signal.throwIfAborted()
-    const taskId = receivedIngestId(jobId, row), key = 'file', previous = (await engine.result({ taskId, candidateKeys: [key] })).results[0]
     const state = row.uploads?.[jobId]
+    let taskId = state?.taskId ?? (row.content || row.cached ? receivedIngestId(jobId, row) : `received_${hash([jobId, row.id, 'pending']).slice(0, 40)}`)
+    const key = 'file'
     const save = async (stage: 'saved' | 'unknown' | 'failed', error?: string) => updateReceivedResume(store, row.id, record => {
       record.uploads ??= {}; record.uploads[jobId] = { taskId, stage, at: new Date().toISOString(), ...(error ? { error: safeError(error) } : {}) }
     })
     const result: TaskResult = { key: row.id, name: row.fileName, stage: 'sending', detail: '正在上传到当前职位 · 新简历 · 未处理', updatedAt: new Date().toISOString() }
-    if (state?.stage === 'saved' || previous?.stage === 'saved') {
-      await save('saved'); result.stage = 'skipped'; result.detail = '这份附件已上传到当前职位，已跳过'; await onResult(result, index); continue
+    const priorOutcome = async (stage?: string) => {
+      if (stage === 'saved') {
+        await save('saved'); result.stage = 'skipped'; result.detail = '这份附件已上传到当前职位，已跳过'; await onResult(result, index); return true
+      }
+      if (stage === 'unknown') {
+        await save('unknown', '上次上传已停止，请先在薪人薪事核对，未重复提交')
+        result.stage = 'unknown'; result.detail = '上次上传已停止，请先在薪人薪事核对，未重复提交'; await onResult(result, index); stopped = true; return true
+      }
+      return false
     }
-    if (state?.stage === 'unknown' || previous?.stage === 'unknown') {
-      await save('unknown', '上次上传已停止，请先在薪人薪事核对，未重复提交')
-      result.stage = 'unknown'; result.detail = '上次上传已停止，请先在薪人薪事核对，未重复提交'; await onResult(result, index); stopped = true; break
+    if (await priorOutcome(state?.stage) || await priorOutcome((await engine.result({ taskId, candidateKeys: [key] })).results[0]?.stage)) {
+      if (stopped) break
+      continue
     }
-    const file = await cachedReceivedFile(store, row)
-    if (!file) { result.stage = 'failed'; result.detail = '本地附件不可用，请先同步平台简历'; await save('failed', result.detail); await onResult(result, index); continue }
+    let file: CapturedFile
+    try {
+      file = await input.readFile(row, signal)
+      row.content = await resumeFileFingerprint(file)
+    } catch (error) {
+      signal.throwIfAborted()
+      if (/UNKNOWN|TASK_STORAGE_UNAVAILABLE/.test(String(error))) throw error
+      result.stage = 'failed'; result.detail = safeError(error); await save('failed', result.detail); await onResult(result, index); continue
+    }
+    await updateReceivedResume(store, row.id, record => { record.content = row.content })
+    taskId = receivedIngestId(jobId, row)
+    // A different message may contain the same file. Check its durable receipt after hashing.
+    if (await priorOutcome((await engine.result({ taskId, candidateKeys: [key] })).results[0]?.stage)) {
+      if (stopped) break
+      continue
+    }
     await onResult(result, index)
     // Persist before entering the upload pipeline. A crash or lost RPC reply
     // cannot turn a dispatched upload into an automatically retryable item.

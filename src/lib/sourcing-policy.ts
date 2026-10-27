@@ -9,11 +9,13 @@ import { supplementParts } from './sourcing/matching-skill.js'
 import { isSourcingFilterControl } from './sourcing-search.js'
 import { resumeDetailContent } from './resume-detail-identity.js'
 import { fixedSourcingFields } from './sourcing/requirement-policy.js'
+import { SOURCING_MAX_LIMIT } from '../shared/sourcing-settings.js'
 
 export const sourcingStartSpec = z.object({ id: z.string().uuid(), jobId: z.string().min(1).max(64),
+  jobDescription: z.string().max(20000).optional().describe('本轮编辑后的职位描述；省略则读取当前职位描述，硬性条件仍采用职位固定字段'),
   sourceMode: z.enum(['recommend', 'search']).default('recommend').describe('默认从人才推荐寻聘；只有用户明确要求主动搜索时才传 search，不能因推荐不足自动切换'),
   platforms: z.array(z.enum(PLATFORM_KEYS)).min(1).max(PLATFORM_KEYS.length).refine(rows => new Set(rows).size === rows.length).describe('仅从所选职位的 jobs[].platforms 中选择已对接同步的平台，不默认同时选择两个平台'),
-  minimumScore: z.number().int().min(0).max(100).default(DEFAULT_MINIMUM_SCORE), autoGreet: z.boolean().default(false), supplement: z.string().trim().max(4000).default(''), limit: z.number().int().min(1).max(50).describe('每个平台独立目标人数，例如选择两个平台、limit=5表示每平台5人，共10人'), confirmed: z.literal(true),
+  minimumScore: z.number().int().min(0).max(100).default(DEFAULT_MINIMUM_SCORE), autoGreet: z.boolean().default(false), supplement: z.string().trim().max(4000).default(''), limit: z.number().int().min(1).max(SOURCING_MAX_LIMIT).describe('每个平台独立目标人数，范围1至100，例如选择两个平台、limit=5表示每平台5人，共10人'), confirmed: z.literal(true),
 }).strict()
 export const sourcingSource = (position: SourcingPosition, supplement: string) => {
   const fixed = fixedSourcingFields(position)

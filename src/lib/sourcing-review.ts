@@ -34,17 +34,17 @@ export function candidateCommunication(candidate: SourcingCandidate, index: Retu
   return index.get(hash([candidate.platform, candidate.profileUrl])) ?? 'none'
 }
 export function taskHistoryPage(jobs: WorkbenchJob[], page: number, kind?: TaskKind): TaskHistoryPage {
-  const ordered = jobs.filter(job => !kind || job.kind === kind).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+  const ordered = jobs.filter(job => !job.historyCleared && (!kind || job.kind === kind)).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
   const pageSize = 20, lastPage = Math.max(1, Math.ceil(ordered.length / pageSize)), current = Math.min(page, lastPage)
   return { total: ordered.length, page: current, pageSize, records: ordered.slice((current - 1) * pageSize, current * pageSize).map(job => {
     const source = job.kind === 'talent_sourcing' ? job as SourcingJob : undefined
     return { id: job.id, kind: job.kind, platform: job.platform, jobId: source?.jobId, jobName: source?.position?.name || job.jobName || job.platformJobName || job.destinationLabel || '',
-      status: job.status, createdAt: job.createdAt, completed: source ? sourcingQualifiedCount(source) : taskResultRows(job).filter(row => job.kind === 'greeting' ? hasGreeted(row) : row.stage === 'succeeded').length, limit: source ? sourcingTotalTarget(source) : job.limit }
+      status: job.status, createdAt: job.createdAt, completed: source ? source.talentCleared ? source.clearedCandidateCount ?? 0 : sourcingQualifiedCount(source) : taskResultRows(job).filter(row => job.kind === 'greeting' ? hasGreeted(row) : row.stage === 'succeeded').length, limit: source ? sourcingTotalTarget(source) : job.limit }
   }) }
 }
 
 export function sourcingResults(jobs: SourcingJob[], jobId: string, roundId: string, communications: ReturnType<typeof communicationIndex>, contacts: CandidateContact[] = [], attachments: ReceivedResumeRecord[] = []): import('../shared/sourcing.js').SourcingResults {
-  const ordered = jobs.filter(job => job.kind === 'talent_sourcing' && job.jobId === jobId)
+  const ordered = jobs.filter(job => job.kind === 'talent_sourcing' && job.jobId === jobId && !job.talentCleared)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
   const selected = roundId === 'all' ? undefined : ordered.find(job => job.id === roundId)
   if (roundId !== 'all' && !selected) throw new Error('该职位下没有这轮寻聘记录')

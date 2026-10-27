@@ -649,6 +649,11 @@ test('minimum score is validated, defaults to 60, and accepts both 0 and 100',()
  for(const minimumScore of [0,30,100])assert.equal(sourcingStartSpec.parse({...input,minimumScore}).minimumScore,minimumScore)
  for(const minimumScore of [-1,101,30.5,'30',null,NaN])assert.equal(sourcingStartSpec.safeParse({...input,minimumScore}).success,false)
 })
+test('sourcing task targets allow 1 to 100 per platform and reject larger or non-integer values',()=>{
+ const input={id:randomUUID(),jobId:'job',platforms:['liepin','boss'],confirmed:true}
+ for(const limit of [1,51,100])assert.equal(sourcingStartSpec.parse({...input,limit}).limit,limit)
+ for(const limit of [0,101,1.5,'100',NaN])assert.equal(sourcingStartSpec.safeParse({...input,limit}).success,false)
+})
 for(const minimumScore of [30,6]) test(`configured threshold ${minimumScore} governs detail persistence and greeting without changing list screening`,async()=>{
  const partial=[{...assessments[0],state:'partial'},assessments[1]]
  const out=await fixture(async tools=>{

@@ -11,7 +11,11 @@ import type { BrowserAgentRunner } from './host-browser-agent.js'
 import { safeError } from './task-error.js'
 import { resumeDiagnosis } from './resume-diagnosis.js'
 import { logError, logKey, type DeveloperLog } from './developer-log.js'
-import { selectReceivedResumes } from './received-resume-store.js'
+import { selectReceivedResumes, matchesReceivedResume, type ReceivedResumeRecord } from './received-resume-store.js'
+import { fetchReceivedResumeFile } from './received-resume-file.js'
+import { recruitmentPlatform } from './platforms/registry.js'
+import { assertPlatformTaskLogin } from './platform-login.js'
+import type { SourcingJob } from '../shared/sourcing.js'
 import { uploadReceivedFiles } from './received-resume-upload.js'
 import { platformDefinition } from './platforms/catalog.js'
 import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, PLATFORM_KEYS, RESUME_DEFAULTS, RESUME_LIBRARIES, RESUME_LIBRARY_STATUSES, DELIVERY_TYPE_OPTIONS, type WorkbenchJob, type ResumeOptions } from '../shared/workbench.js'
@@ -228,6 +232,7 @@ export class ResumeImport implements WorkbenchTaskExecutor {
         job.jobName = options.jobs.find(row => row.id === job.jobId)?.label
         job.destinationLabel = '新简历 · 未处理'; job.status = 'running'
         const outcome = await uploadReceivedFiles({ store: this.store, engine: this.engineOf(signal), jobId: job.jobId, records, options, signal,
+          readFile: (row, readSignal) => this.receivedFile(row, readSignal),
           onResult: async (result, index) => {
             job.results[index] = result
             await this.progress(job, 'importing', `${index + 1}/${records.length}：${result.name} · ${result.detail}`)
@@ -241,5 +246,33 @@ export class ResumeImport implements WorkbenchTaskExecutor {
         await this.progress(job, 'finished', signal.aborted ? '附件上传已停止' : safeError(error))
       }
     })
+  }
+
+  /** Called only with an authorized stored selection and the workbench task lock held. */
+  async receivedFile(row: ReceivedResumeRecord, signal: AbortSignal) {
+    return fetchReceivedResumeFile({ store: this.store, row, signal, logger: this.logger, refresh: async (record, refreshSignal) => {
+      const platform = recruitmentPlatform(record.platform), source = platform.receivedAttachment
+      if (!source) throw new Error('当前平台暂不支持重新获取附件链接，请先同步平台简历')
+      const jobs = await this.store.list<SourcingJob>('sourcing-')
+      const candidate = jobs.flatMap(job => job.candidates ?? []).find(person => person.platformIdentity?.id === record.resumeId && matchesReceivedResume(person, record))
+      if (!candidate) throw new Error('附件所属候选人记录不可用，请先同步平台简历')
+      let owned: { workflowTaskId?: string; taskId?: string } | undefined, acquired = false
+      try {
+        await this.call('browser_ensure', { timeoutSeconds: ENSURE_TIMEOUT_SECONDS }, refreshSignal)
+        const state = await this.call('browser_status', {}, refreshSignal)
+        if (!state.ready || state.workflowTaskId || state.executionOwner === 'remote' || (!state.available && !state.requiresBegin)) throw new Error('浏览器未就绪或被其他任务占用')
+        owned = await this.call('browser_begin', {}, refreshSignal); acquired = true
+        await assertPlatformTaskLogin((tool, args, requestSignal) => this.call(tool, args ?? {}, requestSignal), record.platform, '重新获取附件链接', refreshSignal)
+        const sync = platform.communicationSync
+        const broker = new AgentBrowserTools(await this.browser.listTools(refreshSignal),
+          (tool, args, requestSignal) => this.call(tool, args, requestSignal), { origins: sync?.origins ?? PLATFORMS[record.platform].origins,
+            signal: refreshSignal, confirmationId: `resume-link-${record.id}`, hostTools: sync?.hostTools,
+            observationFormat: 'dom', observationViewportOnly: true, observationWait: 'none', logger: this.logger })
+        return await source.refresh(broker, candidate, record, this.store, refreshSignal, true)
+      } finally {
+        if (acquired) try { await releaseOwnedBrowser((tool, args, requestSignal) => this.call(tool, args, requestSignal), owned) }
+        catch (error) { this.logger?.write('warn', 'browser.release_failed', logError(error)) }
+      }
+    } })
   }
 }

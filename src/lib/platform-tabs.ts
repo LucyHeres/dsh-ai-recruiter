@@ -14,9 +14,11 @@ export async function findPlatformTab(call: Call, platform: Platform, policy: Re
   const origin = platformOrigin(platform)
   const listed = await call('browser_list_tabs', { policy }, signal).catch(() => undefined)
   const tabs = Array.isArray(listed?.tabs) ? listed.tabs : []
-  const match = tabs.find((tab: any) => {
+  const candidates = tabs.filter((tab: any) => {
     if (!Number.isInteger(tab?.tabId)) return false
-    try { return new URL(String(tab.url)).origin === origin } catch { return false }
+    try { return (PLATFORMS[platform].origins as readonly string[]).includes(new URL(String(tab.url)).origin) } catch { return false }
   })
+  const match = candidates.find((tab: any) => tab.active)
+    ?? candidates.find((tab: any) => new URL(tab.url).origin === origin) ?? candidates[0]
   return match?.tabId
 }

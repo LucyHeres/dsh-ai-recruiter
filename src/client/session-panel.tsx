@@ -11,6 +11,8 @@ import type { JobOption, WorkbenchState } from '../shared/workbench.js'
 import type { SourcingJob } from '../shared/sourcing.js'
 import { SelectMenu } from './components/select-menu.js'
 import { SourcingPanel } from './features/sourcing-panel.js'
+import { useExtensionSetup } from './components/extension-setup.js'
+import { isExtensionRequired } from '../shared/connection-status.js'
 import { taskResultRows } from '../shared/greeting-results.js'
 import { greetingLabel, greetingDetail, hasGreeted } from '../shared/communication.js'
 import styles from './style.css'
@@ -121,13 +123,18 @@ export function SessionRecruitmentPanel({ sessionId, rpc, openWorkbench }: Props
   const occupiedElsewhere = !!position && !!workbench?.activeJobId && workbench.activeJobId !== executionId
   const legacy = latest && latest.kind !== 'talent_sourcing' ? latest : undefined
   const locked = !workbench || !!busy || !!pending.current || !!workbench.activeJobId || !!workbench.connection.busy || !!workbench.connection.activeWorkflow
+  const setup = useExtensionSetup(workbench?.extensionInstallation, rpc, value => setWorkbench(previous => previous ? { ...previous, extensionInstallation: value } : previous))
   async function perform(label: string, action: () => Promise<void>) {
     if (actionLock.current) return
     actionLock.current = true; setBusy(label); setActionError('')
-    try { await action() } catch (failure) { if (mounted.current) setActionError(failure instanceof Error ? failure.message : '操作失败') }
+    try { await action() } catch (failure) {
+      if (mounted.current && isExtensionRequired(failure)) { pending.current = undefined; setup.show(); void setup.check() }
+      else if (mounted.current) setActionError(failure instanceof Error ? failure.message : '操作失败')
+    }
     finally { actionLock.current = false; if (mounted.current) setBusy('') }
   }
   function start(settings: Record<string, unknown>) {
+    if (setup.missing) { setup.show(); return }
     void perform('启动任务', async () => {
       const request = { sessionId, task: { ...settings, kind: 'talent_sourcing', id: crypto.randomUUID() } }
       pending.current = request
@@ -163,11 +170,13 @@ export function SessionRecruitmentPanel({ sessionId, rpc, openWorkbench }: Props
     </header>
     {(error || actionError || positionError || connectionError) && <p role="alert" className="air-session-error">{error || actionError || positionError || connectionError}{positionError && <button type="button" className="air-text-button" onClick={() => setReloadPositions(value => value + 1)}>重试职位读取</button>}</p>}
     <div className="air-session-content">
+      {setup.banner}
       {occupiedElsewhere && <p className="air-session-occupied" role="status">另一个招聘任务正在执行，结束后可开始当前职位的寻聘。</p>}
       {legacy && <LegacyTask job={legacy} busy={!!busy} copied={copied} onStop={() => void perform('停止任务', async () => { await rpc('stop', { id: legacy.id }) })} onCopy={() => copyLog(legacy)} />}
-      {!state && !error ? <p className="air-session-empty" role="status">正在读取当前会话任务…</p> : position ? <SourcingPanel key={sessionId + ':' + position.id} compact positions={options} positionId={position.id} executionId={executionId} rpc={rpc} state={workbench} locked={locked} pending={!!pending.current && !busy} busy={busy} onStart={start} onReconcile={reconcile} /> : <div className="air-session-empty"><h3>从一个职位开始招聘</h3><p>{preferred ? '最近涉及的职位暂不可用，请从上方重新选择。' : '选择上方职位，或在对话里说明要招聘的职位。'}</p></div>}
+      {!state && !error ? <p className="air-session-empty" role="status">正在读取当前会话任务…</p> : position ? <SourcingPanel key={sessionId + ':' + position.id} compact positions={options} positionId={position.id} executionId={executionId} rpc={rpc} state={workbench} locked={locked} pending={!!pending.current && !busy} busy={busy} onStart={start} onReconcile={reconcile} onRequireExtension={setup.show} /> : <div className="air-session-empty"><h3>从一个职位开始招聘</h3><p>{preferred ? '最近涉及的职位暂不可用，请从上方重新选择。' : '选择上方职位，或在对话里说明要招聘的职位。'}</p></div>}
     </div>
     {(!!state?.calls?.length || !!latest) && <details className="air-session-diagnostics"><summary>执行记录 <span>{state?.calls?.length || 0}</span><ChevronDownIcon aria-hidden="true" /></summary>{latest && <div className="air-session-log-action"><span>{taskFeature(latest.kind).label} · {latest.status === 'unknown' && latest.kind !== 'resume_import' ? '已停止' : statusLabels[latest.status]}</span><button type="button" className="air-text-button" disabled={!!busy} onClick={() => copyLog(latest)}>{copied === latest.id ? '日志已复制' : '复制操作日志'}</button></div>}<h3 className="air-session-diagnostic-label">工具调用记录</h3><ol className="air-session-calls">{(state?.calls || []).slice(0, 8).map((call, index) => <li key={call.at + index}><time>{new Date(call.at).toLocaleTimeString('zh-CN', { hour12: false })}</time><strong>{call.summary}</strong><span>{call.ok ? `${call.durationMs} ms` : `失败${call.code ? ` · ${call.code}` : ''}`}</span></li>)}</ol></details>}
+    {setup.guide}
   </section>
 }
 

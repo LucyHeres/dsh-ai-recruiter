@@ -27,6 +27,8 @@ test('position cards show only the five recruitment platforms, all inline withou
  const tags=nodes(cards[3]).filter(node=>node?.props?.className?.includes('air-position-platform-tag'))
  assert.equal(tags.length,5);assert.ok(tags.every(node=>node.type==='span'))
  assert.equal(nodes(cards[3]).filter(node=>node?.type==='button').length,1,'the only card button is the recruit action')
+ assert.deepEqual(nodes(cards[3]).filter(node=>node?.type==='dt').flatMap(node=>nodes(node.props.children)),['达标人才','已打招呼','入库简历'])
+ assert.ok(!nodes(tree).includes('在线简历'))
 })
 
 test('position homepage uses the real RPC envelope with empty args for its no-argument Remote endpoint', async () => {

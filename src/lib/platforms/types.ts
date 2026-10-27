@@ -6,6 +6,8 @@ import type { Store } from '../store.js'
 import type { SourcingDriver, SourcingDriverContext } from '../sourcing/types.js'
 import type { PositionTitleAlias } from '../position-controls.js'
 import type { VisualResume } from '../sourcing/visual-resume.js'
+import type { ReceivedResumeRecord } from '../received-resume-store.js'
+import type { CapturedFile } from '../file-transfer.js'
 
 export type ResumeCaptureContext = {
   broker: AgentBrowserTools; page: any; candidate: { name: string; listText: string }
@@ -24,6 +26,10 @@ export interface PlatformCommunication {
   scope(page: any): CommunicationSource | undefined
   /** 从已 inspect 的节点解析平台业务 ID。没有稳定 ID 的平台可以省略。 */
   identity?(node: any, source: CommunicationSource): string[]
+  /** 平台实际展示的列表筛选；空数组表示不支持该视图，不能借用其它筛选的语义。 */
+  filters?: Partial<Record<'all' | 'greeted' | 'resume_received', readonly string[]>>
+  /** 沟通卡片没有年龄或资料链接时，提供可 inspect 的记录锚点。 */
+  recordSeed?(item: any): boolean
   /** 标记「收到简历」卡片的外层类名，用于区分接收记录与普通会话。 */
   receivedWrapper?: string
 }
@@ -87,6 +93,11 @@ export interface PlatformDefinition {
 /** Website paths, prompts and custom controls have one owner. Workflow code
  * consumes this contract and never selects an implementation by hostname. */
 export interface RecruitmentPlatform {
+  receivedAttachment?: {
+    acceptsUrl(url: URL): boolean
+    refresh(broker: AgentBrowserTools, candidate: SourcingCandidate, row: ReceivedResumeRecord, store: Store, signal: AbortSignal,
+      capture?: boolean): Promise<ReceivedResumeRecord | { record: ReceivedResumeRecord; file: CapturedFile }>
+  }
   candidateIdentity?(page: any, refs: string[], broker: AgentBrowserTools): PlatformCandidateIdentity | undefined
   /** Normalize known UI state within a verified single card; never join names. */
   candidateTextIdentity?(text: string): { canonical: string; aliases: string[] }

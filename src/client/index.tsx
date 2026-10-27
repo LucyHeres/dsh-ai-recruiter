@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import React, { useEffect, useRef, useState } from 'react'
 import {
-  ArrowLeftIcon, FileTextIcon, ArrowRightIcon, ArrowTopRightIcon, CheckIcon, CheckCircledIcon,
+  ArrowLeftIcon, FileTextIcon, ArrowRightIcon, CheckIcon, CheckCircledIcon,
   ChatBubbleIcon, ChevronRightIcon, ClockIcon,
   CounterClockwiseClockIcon, Cross2Icon, DesktopIcon, ExclamationTriangleIcon, Link2Icon, MinusCircledIcon, PlayIcon, ReloadIcon, StopIcon,
 } from '@radix-ui/react-icons'
@@ -10,19 +10,22 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { ENSURE_TIMEOUT_SECONDS, PLATFORMS, TASK_FEATURES, EXTENSION_INSTALL_URL, taskFeature, type ExtensionInstallation, type TaskKind, type WorkbenchState, type WorkbenchJob, type TaskResultStage, type DeveloperLogs } from '../shared/workbench.js'
+import { PLATFORMS, TASK_FEATURES, taskFeature, type TaskKind, type WorkbenchState, type WorkbenchJob, type TaskResultStage, type DeveloperLogs } from '../shared/workbench.js'
 import styles from './style.css'
 import { taskResultRows } from '../shared/greeting-results.js'
 import { greetingLabel, greetingDetail, greetingNotice, hasGreeted } from '../shared/communication.js'
 import { sourcingTotalTarget } from '../shared/sourcing-score.js'
 import { registerSessionPanel } from './session-panel.js'
 import { TaskRecords } from './features/task-records.js'
+import { DataManagement } from './features/data-management.js'
 import { PositionHome } from './features/position-home.js'
 import { SidePanel } from './components/side-panel.js'
 import type { JobOption } from '../shared/workbench.js'
 import { SourcingPanel } from './features/sourcing-panel.js'
-import { browserConnectionStatus } from '../shared/connection-status.js'
+import { browserConnectionStatus, isExtensionRequired, EXTENSION_MISSING_MESSAGE } from '../shared/connection-status.js'
+import { useExtensionSetup } from './components/extension-setup.js'
 import { createWorkbenchNavigation, type WorkbenchNavigation } from './workbench-navigation.js'
+import { TalentSearchIcon } from './components/talent-search-icon.js'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 
 type Rpc = <T>(method: string, request?: unknown, signal?: AbortSignal) => Promise<T>
@@ -37,7 +40,7 @@ export function apply(ctx: Context) {
     return result.value as never
   }
   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'ai-recruiter', inject: () => ({ rpc, navigation }) }, WorkbenchPage))
-  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'ai-recruiter', label: 'AI 招聘工作台', order: 80 }, () => <span aria-hidden="true">✦</span>))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'ai-recruiter', label: 'AI 招聘工作台', order: 80 }, TalentSearchIcon))
   registerSessionPanel(ctx, rpc, position => { navigation.visit(position); ctx.layout.selectPanel('ai-recruiter' as MainPanelId); if (ctx.sidebarRight.isExpanded()) ctx.sidebarRight.toggleExpanded() })}
 
 const statusNames: Record<WorkbenchJob['status'], string> = {
@@ -60,6 +63,8 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
   const [inspectedTask, setInspectedTask] = useState<WorkbenchJob>()
   const [position, setPosition] = useState<JobOption | undefined>(() => navigation?.current())
   const [activityOpen, setActivityOpen] = useState(false)
+  const [dataOpen, setDataOpen] = useState(false)
+  const [dataRevision, setDataRevision] = useState(0)
   const pending = useRef<Record<string, unknown> & { id: string; kind: TaskKind }>()
   const mounted = useRef(true)
   const actionInFlight = useRef(false)
@@ -88,15 +93,18 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
     actionInFlight.current = true
     setBusy(label); setError('')
     try { await action() }
-    catch (error) { if (mounted.current) setError(error instanceof Error ? error.message : String(error)) }
+    catch (error) {
+      if (mounted.current && isExtensionRequired(error)) { pending.current = undefined; setup.show(); void setup.check() }
+      else if (mounted.current) setError(error instanceof Error ? error.message : String(error))
+    }
     finally { actionInFlight.current = false; if (mounted.current) setBusy('') }
   }
 
   const connection = state?.connection
   const installation = state?.extensionInstallation
+  const setup = useExtensionSetup(installation, rpc, value => setState(previous => previous ? { ...previous, extensionInstallation: value } : previous))
   const extensionInstalled = installation?.status === 'installed'
-  const extensionMissing = installation?.status === 'not_installed'
-  const installationLabel = extensionInstalled ? '已安装' : extensionMissing ? '未检测到' : installation ? '无法确认' : '待检测'
+  const installationLabel = extensionInstalled ? '已安装' : setup.missing ? '未安装' : installation ? '无法确认' : '待检测'
   const knownJobs = state?.jobs ?? []
   const featureJobs = [...knownJobs, ...(inspectedTask && !knownJobs.some(job => job.id === inspectedTask.id) ? [inspectedTask] : [])].filter(job => job.kind === selectedKind)
   const current = featureJobs.find(job => job.id === selected[selectedKind])
@@ -106,13 +114,9 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
   const success = results.filter(item => current?.kind === 'greeting' ? hasGreeted(item) : item.stage === 'succeeded').length
   const locked = !state || !!busy || !!state?.activeJobId || !!connection?.busy || !!connectionError || !!connection?.activeWorkflow
   const occupied = !!state?.activeJobId || !!connection?.busy || !!connection?.activeWorkflow
-  const ready = !!connection?.ready && (connection.available || connection.requiresBegin) && !occupied && !connectionError
-  // 连接进行中时，路径上停留的那一步显示 loading；已完成的步骤仍显示对勾。
-  const connectionStatus = browserConnectionStatus(state, busy, connectionError)
-  const connecting = connectionStatus === '连接中'
-  const connectingStep = !connecting ? '' : !connection?.gateway ? 'gateway'
-    : !connection.connected ? 'connection'
-    : !connection.authenticated ? 'authenticated' : ''
+  const connectionStatus = browserConnectionStatus(state, connectionError)
+  const ready = connectionStatus === '已连接'
+  const connecting = !setup.missing && (busy === '连接中' || !!connection?.connecting)
   const feature = taskFeature(selectedKind)
   const resultFeature = taskFeature(current?.kind ?? selectedKind)
   const isActiveJob = !!current && state?.activeJobId === current.id
@@ -132,6 +136,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
   }, [current?.nextActionAt])
 
   function startTask(settings: Record<string, unknown>, kind: TaskKind = 'talent_sourcing') {
+    if (setup.missing) { setup.show(); return }
     void act('启动任务', async () => {
       const request = { ...settings, id: crypto.randomUUID(), kind }
       pending.current = request
@@ -182,7 +187,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
     <header className="air-header">
       <div className="air-header-inner">
         <div className="air-job-page-title">{position && <button type="button" className="air-sourcing-icon-button" aria-label="返回职位管理" onClick={() => { navigation?.clear(); setPosition(undefined); setInspectedTask(undefined) }}><ArrowLeftIcon aria-hidden="true" /></button>}<div><h1>{position?.name || '职位管理'}</h1>{position && <p>{[position.department, position.city].filter(Boolean).join(' · ') || '职位招聘'}</p>}</div></div>
-        <div className="air-header-actions"><button type="button" className="air-text-button air-records-trigger" onClick={() => setRecordsOpen(true)}><CounterClockwiseClockIcon aria-hidden="true" />任务记录</button><BrowserConnectionPopover status={connectionStatus} ready={ready}>
+        <div className="air-header-actions"><button type="button" className="air-text-button air-records-trigger" onClick={() => setDataOpen(true)}><DesktopIcon aria-hidden="true" />数据管理</button><button type="button" className="air-text-button air-records-trigger" onClick={() => setRecordsOpen(true)}><CounterClockwiseClockIcon aria-hidden="true" />任务记录</button><BrowserConnectionPopover status={connectionStatus}>
           <section id="air-browser-connection" className="air-connection-panel" aria-labelledby="air-connection-title" aria-busy={!state && !connectionError}>
             <div className="air-connection-top">
               <div className="air-connection-heading">
@@ -190,32 +195,30 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
                 <h2 id="air-connection-title">浏览器扩展</h2>
               </div>
               <div className="air-connection-actions">
-                {(extensionMissing || installation?.status === 'unknown') && <a className="air-button air-button-outline air-button-small air-extension-install" href={EXTENSION_INSTALL_URL} target="_blank" rel="noreferrer">{extensionMissing ? '去安装薪招' : '安装指引'}<ArrowTopRightIcon aria-hidden="true" /></a>}
-                <button type="button" className="air-button air-button-outline air-button-small" disabled={locked || ready} onClick={() => void act('连接中', async () => { await rpc('connect'); setState(await rpc('state')) })}>
-                  <Link2Icon aria-hidden="true" />{connecting ? '连接中…' : connectionStatus === '工作中' ? '工作中' : ready ? '已连接' : '连接浏览器'}
+                {(setup.missing || installation?.status === 'unknown') && <button type="button" className="air-button air-button-outline air-button-small" onClick={setup.show}>安装指引</button>}
+                <button type="button" className="air-button air-button-outline air-button-small" disabled={locked || ready || !installation} onClick={() => {
+                  if (setup.missing) { setup.show(); return }
+                  void act('连接中', async () => { await rpc('connect'); setState(await rpc('state')) })
+                }}>
+                  <Link2Icon aria-hidden="true" />{connecting ? '连接中…' : ready ? '已连接' : '连接浏览器'}
                 </button>
-                <button type="button" className="air-text-button air-extension-recheck" disabled={!state || !!busy} onClick={() => void act('检测扩展', async () => {
-                  const value = await rpc<ExtensionInstallation>('checkExtension', {})
-                  if (mounted.current) setState(previous => previous ? { ...previous, extensionInstallation: value } : previous)
-                })}><ReloadIcon aria-hidden="true" />{busy === '检测扩展' ? '检测中…' : '重新检测'}</button>
+                <button type="button" className="air-text-button air-extension-recheck" disabled={!state || !!busy || setup.checking} onClick={() => void setup.check()}><ReloadIcon aria-hidden="true" />{setup.checking ? '检测中…' : '重新检测'}</button>
               </div>
             </div>
             {!state && connectionError ? <p className="air-connection-help">连接状态读取失败，请点击重试读取。</p> : !state ? <div className="air-connection-loading" aria-label="正在读取连接状态"><span className="air-skeleton" /><span className="air-skeleton" /><span className="air-skeleton" /></div> : <div className="air-connection-path">
-              <Connection label="扩展安装" good={extensionInstalled} detail={installationLabel} showDetail tag />
+              <Connection label="安装扩展" good={extensionInstalled} detail={installationLabel} showDetail tag />
               <ChevronRightIcon className="air-path-arrow" aria-hidden="true" />
-              <Connection label="本机网关" good={connection?.gateway} pending={connectingStep === 'gateway'} detail={connection?.gateway ? '运行中' : '未启动'} />
-              <ChevronRightIcon className="air-path-arrow" aria-hidden="true" />
-              <Connection label="扩展连接" good={connection?.connected} pending={connectingStep === 'connection'} detail={connection?.connected ? '已连接' : '未连接'} />
-              <ChevronRightIcon className="air-path-arrow" aria-hidden="true" />
-              <Connection label="扩展授权" good={connection?.authenticated} pending={connectingStep === 'authenticated'} detail={connection?.authenticated ? '已授权' : '待授权'} />
+              <Connection label="连接浏览器" good={extensionInstalled && ready} pending={connecting && !ready} detail={setup.missing ? '请先安装' : ready ? '已连接' : '未连接'} />
             </div>}
-            {connecting && <p className="air-connection-help" role="status">正在唤醒薪招扩展并连接，最长等待 {ENSURE_TIMEOUT_SECONDS} 秒。</p>}
+            {connecting && <p className="air-connection-help" role="status">正在连接浏览器…</p>}
+            {setup.missing && <p className="air-connection-help">{EXTENSION_MISSING_MESSAGE}</p>}
           </section>
         </BrowserConnectionPopover></div>
       </div>
     </header>
 
     <div className="air-page">
+      {setup.banner}
       {(error || connectionError) && <div className="air-alert" role="alert">
         <ExclamationTriangleIcon aria-hidden="true" />
         <div><strong>{error ? '操作未完成' : '连接状态暂时无法更新'}</strong><p>{error || connectionError}</p></div>
@@ -224,8 +227,9 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
       </div>}
 
       {position && knownJobs.some(job => job.id === state?.activeJobId && job.kind === 'resume_import' && (job as WorkbenchJob & {jobId?: string}).jobId === position.id) && <div className="air-resume-live"><span><span className="air-status-dot" />简历正在入库到当前职位</span><button className="air-text-button" type="button" onClick={() => { setSelectedKind('resume_import'); setSelected(previous => ({...previous,resume_import:state?.activeJobId || ''})); setActivityOpen(true) }}>查看入库进度<ArrowRightIcon aria-hidden="true" /></button></div>}
-      {position ? <SourcingPanel key={position.id} positionId={position.id} rpc={rpc} state={state} locked={locked} pending={needsReconcile} busy={busy} blockingReason={blockingReason} onStart={settings => startTask(settings, 'talent_sourcing')} onReconcile={reconcileTask} selectedTaskId={selected.talent_sourcing} selectedRecord={inspectedTask?.kind === 'talent_sourcing' ? inspectedTask : undefined} /> : <PositionHome rpc={rpc} onRecruit={job => { setPosition(job); setInspectedTask(undefined); setSelectedKind('talent_sourcing') }} />}
+      {position ? <SourcingPanel key={`${position.id}:${dataRevision}`} positionId={position.id} rpc={rpc} state={state} locked={locked} pending={needsReconcile} busy={busy} blockingReason={blockingReason} onStart={settings => startTask(settings, 'talent_sourcing')} onReconcile={reconcileTask} onRequireExtension={setup.show} selectedTaskId={selected.talent_sourcing} selectedRecord={inspectedTask?.kind === 'talent_sourcing' ? inspectedTask : undefined} /> : <PositionHome key={dataRevision} rpc={rpc} onRecruit={job => { setPosition(job); setInspectedTask(undefined); setSelectedKind('talent_sourcing') }} />}
     </div>
+    {setup.guide}
     {activityOpen && <SidePanel title={current?.kind === 'resume_import' ? '简历入库进度' : '任务详情'} onClose={() => setActivityOpen(false)} className="air-task-activity-panel">
         <section className="air-activity" aria-labelledby="air-activity-title">
           <div className="air-section-heading air-activity-heading"><div><h2 id="air-activity-title">执行进度</h2>{current && <p className="air-task-meta">{resultFeature.label} · {PLATFORMS[current.platform].label}<time dateTime={current.createdAt}>{formatTime(current.createdAt)}</time></p>}</div>
@@ -252,10 +256,11 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
           <footer className="air-activity-footer"><span><DesktopIcon aria-hidden="true" />记录保存在本机</span><span>结果不确定时自动停止</span></footer>
         </section></SidePanel>}
     {recordsOpen && <TaskRecords rpc={rpc} onClose={() => setRecordsOpen(false)} onSelect={inspectTask} onCopyLog={copyTaskLog} busy={busy} copiedId={copiedLogTask} selectedId={current?.id} />}
+    {dataOpen && <DataManagement rpc={rpc} locked={occupied || !!busy} onClose={() => setDataOpen(false)} onCleared={() => { setInspectedTask(undefined); setActivityOpen(false); setSelected({}); setDataRevision(value => value + 1); void rpc<WorkbenchState>('state').then(setState).catch(() => {}) }} />}
   </div>
 }
 
-function BrowserConnectionPopover({ status, ready, children }: { status: string; ready: boolean; children: React.ReactNode }) {
+function BrowserConnectionPopover({ status, children }: { status: ReturnType<typeof browserConnectionStatus>; children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -280,8 +285,8 @@ function BrowserConnectionPopover({ status, ready, children }: { status: string;
 
   return <div className="air-browser-popover" ref={root}>
     <button type="button" className="air-browser-trigger" ref={trigger} aria-expanded={open} aria-controls="air-browser-connection" onClick={() => setOpen(value => !value)}>
-      <DesktopIcon aria-hidden="true" /><span>浏览器扩展</span>
-      <span className={`air-connection-status ${ready ? 'is-ready' : ''} ${status === '工作中' ? 'is-working' : ''}`}><span className="air-status-dot" aria-hidden="true" />{status}</span>
+      <Link2Icon aria-hidden="true" /><span>浏览器扩展</span>
+      <span className={`air-connection-status ${status === '已连接' ? 'is-ready' : ''}`}><span className="air-status-dot" aria-hidden="true" />{status}</span>
     </button>
     {open && children}
   </div>

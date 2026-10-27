@@ -155,6 +155,18 @@ test('drawer selects only the latest sourcing execution for its session and posi
   assert.equal(sourceProps(render(state,{...workbench,activeJobId:running.id,jobs:[running]})).executionId,'just-started','global polling may confirm the new session task before session polling')
 })
 
+test('finished login-required attempts allow a fresh start once browser execution is released', () => {
+  const failed = { ...job, kind: 'talent_sourcing', jobId: 'java', status: 'failed', phase: 'finished', detail: '猎聘需要登录或验证，请在保留的页面中完成后，手动再次点击“开始寻聘”。' }
+  const state = { ...session, latestPositionId: 'java', jobs: [failed], activeJobId: null }
+  const view = fixture()
+  const render = connection => view.render('sidebar.right.pane.tab', 'session-one', [state, undefined, '', '', '', '', positions, { ...workbench, jobs: [failed], connection }]).element
+  assert.equal(sourceProps(render({ ...workbench.connection, activeWorkflow: true })).locked, true)
+  const released = render({ ...workbench.connection, available: false, requiresBegin: true })
+  assert.equal(sourceProps(released).locked, false, 'an expired workflow needs a new begin, not a permanent disabled button')
+  assert.equal(sourceProps(released).executionId, failed.id, 'login does not rewrite or automatically resume a finished attempt')
+  assert.equal(view.requests.length, 0)
+})
+
 test('drawer startup hides reconciliation until a response is lost and retries the same session/task identity', async () => {
   const view = fixture(); let rejectStart, starts = 0
   view.respond(async (_path, endpoint) => {

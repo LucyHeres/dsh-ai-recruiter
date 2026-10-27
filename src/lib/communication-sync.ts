@@ -6,6 +6,7 @@ import { platformDefinition } from './platforms/catalog.js'
 import { candidateContactKeys, saveCandidateContact } from './candidate-contact.js'
 import { PLATFORMS, type Platform } from '../shared/workbench.js'
 import type { SourcingCandidate, CommunicationSyncResult } from '../shared/sourcing.js'
+import { assertPlatformPageLogin, isPlatformLoginRequired, platformPageNeedsLogin } from './platform-login.js'
 
 const receivedText = /^(?:已收到(?:对方)?简历|已接收简历|已交换简历|对方已(?:发送|发来)简历|收到(?:了)?(?:对方的)?简历)$/
 const greetedText = /^(?:已打招呼|已沟通|继续沟通)$/
@@ -18,7 +19,7 @@ const fields = new Map([
   ['geekid', 'geek'], ['encryptgeekid', 'geek'], ['encgeekid', 'geek'],
 ])
 const fieldKey = (key: string) => fields.get(key.replace(/[_-]/g, '').toLowerCase())
-const validId = (value: string) => /^[A-Za-z0-9_-]{4,180}$/.test(value)
+const validId = (value: string) => /^[A-Za-z0-9_~-]{4,180}$/.test(value)
 const personRow = (item: any) => ['article', 'listitem', 'row', 'li'].includes(item.role)
 const recordText = (item: any) => normalized(item.context?.text || item.name)
 
@@ -81,6 +82,7 @@ export async function readCommunicationObservations(platform: Platform, page: an
   const seeds = page.items.filter((item: any) => readable(item) && !item.dialogRef && (
     item.href && communicationIdentityTokens(platform, item, page.url).some(token => !token.startsWith('url:') || targets.some(target => target.profileUrl && token === `url:${target.profileUrl}`))
     || targets.some(target => normalized(item.name) === normalized(target.name))
+    || communication?.recordSeed?.(item)
     || /\d{2}\s*岁/.test(recordText(item))
     || personRow(item)))
   const result: CommunicationObservation[] = [], visited = new Set<string>()
@@ -128,7 +130,12 @@ export function assertCommunicationRead(call: AgentBrowserCall, page: any) {
   if (['browser_navigate', 'browser_scroll', 'browser_open_tab', 'browser_close_tab'].includes(call.name) && call.purpose !== 'business_write') return
   if (call.name === 'browser_click' && call.purpose !== 'business_write') {
     const item = page?.items?.find((item: any) => item.ref === call.args.ref)
-    if (item && readable(item) && /^(?:全部|全部沟通|我发起的|我发起|有简历|已收简历|收到简历|下一页)$/.test(normalized(item.name))) return
+    const platform = (Object.keys(PLATFORMS) as Platform[]).find(key => {
+      try { return (PLATFORMS[key].origins as readonly string[]).includes(new URL(page?.url).origin) } catch { return false }
+    })
+    const filters = platform && platformDefinition(platform).communication?.filters
+    if (item && readable(item) && (/^(?:全部|全部沟通|我发起的|我发起|有简历|已收简历|收到简历|下一页)$/.test(normalized(item.name))
+      || Object.values(filters || {}).some(names => names?.includes(normalized(item.name))))) return
   }
   throw new Error('COMMUNICATION_SYNC_READ_ONLY: 状态同步只能读取和切换列表，不能发送或索要简历')
 }
@@ -145,47 +152,51 @@ export async function syncPlatformCommunication(broker: AgentBrowserTools, platf
   const targets = candidates.filter(candidate => candidate.platform === platform)
   const targetTokens = new Map<SourcingCandidate, Set<string>>(targets.map(target => [target,
     new Set(communicationIdentityTokens(platform, { href: target.profileUrl, platformIdentity: target.platformIdentity }, PLATFORMS[platform].url))]))
-  if (![...targetTokens.values()].some(tokens => tokens.size)) return { platform, matched: 0, updated: 0, detail: '候选人缺少可匹配的平台标识，未按姓名推断，已有状态保留' }
+  const unidentified = [...targetTokens.values()].filter(tokens => !tokens.size).length
   const facts = new Map(targets.map(target => [candidateContactKeys(target)[0]!, { greeted: target.communication === 'recorded', resumeReceived: !!target.resumeReceived }]))
-  const complete = () => [...facts.values()].every(row => row.greeted && row.resumeReceived)
-  const matched = new Set<string>(), updated = new Set<string>(); let sourceCount = 0, partial = false
+  const matched = new Set<string>(), updated = new Set<string>(), scanned = new Set<string>(); let sourceCount = 0, partial = false
+  // A sync click must observe the platform even when all saved facts are true.
+  const complete = () => sourceCount > 0 && [...facts.values()].every(row => row.resumeReceived)
   const communication = platformDefinition(platform).communication
   // 缺能力时明确失败，不让通用流程在未知页面上静默返回“未匹配”。
   if (!communication?.entries.length) throw new Error(`PLATFORM_CAPABILITY_UNSUPPORTED: ${platform} 尚未声明沟通列表入口`)
   const entries = communication.entries
   const existingTabs = (await broker.tools.find(tool => tool.name === 'browser_list_tabs')!.execute({}, signal) as any).tabs ?? []
-  const origin = new URL(PLATFORMS[platform].url).origin
-  const existing = existingTabs.filter((tab: any) => { try { return new URL(tab.url).origin === origin } catch { return false } })
+  const existing = existingTabs.filter((tab: any) => { try { return (PLATFORMS[platform].origins as readonly string[]).includes(new URL(tab.url).origin) } catch { return false } })
   if (existing.length > 1 && existing.filter((tab: any) => tab.active).length !== 1) throw new Error('COMMUNICATION_SYNC_TAB_AMBIGUOUS: 请保留一个目标平台页面或切到需要同步的页面')
   let tab = existing.find((tab: any) => tab.active) ?? existing[0], created = false
   const restoreUrl = tab?.url
-  let navigationUnknown = false, restoreFailed = false
+  let navigationUnknown = false, restoreFailed = false, loginRequired = false
   const execute = async (name: string, args: Record<string, unknown>) => broker.tools.find(tool => tool.name === name)!.execute(args, signal)
   try {
+    if (tab && platformPageNeedsLogin(tab)) assertPlatformPageLogin(tab, platform, '同步平台简历')
     if (!tab) { const opened: any = await execute('browser_open_tab', { url: entries[0] }); tab = { tabId: opened.tabId }; created = true }
     for (const entry of entries) {
       if (complete()) break
       await execute('browser_navigate', { tabId: tab.tabId, url: entry })
       if (broker.tools.some(tool => tool.name === 'browser_wait')) await execute('browser_wait', { tabId: tab.tabId, condition: { type: 'dom_quiet' }, timeoutMs: 3000 })
-      let page: any
+      let page: any, listReady = false
       for (let attempt = 0; attempt < 20; attempt++) {
         page = (await execute('browser_snapshot', { tabId: tab.tabId, format: 'dom', viewportOnly: true }) as any)
         page = broker.currentPage()
-        if (page.isLoginPage) throw new Error('COMMUNICATION_SYNC_LOGIN_REQUIRED: 请先完成平台登录或验证')
+        assertPlatformPageLogin(page, platform, '同步平台简历')
         const filtersSettled = page.items.some((item: any) => readable(item) && ['全部', '全部沟通'].includes(normalized(item.name)) && !statesOf(item).includes('occluded'))
         const hasRecords = /\d{2}\s*岁/.test(page.text ?? '') || page.items.some((item: any) => readable(item) &&
-          (personRow(item) || item.href && communicationIdentityTokens(platform, item, page.url).some(token => !token.startsWith('url:')) || targets.some(target => normalized(item.name) === normalized(target.name))))
-        if (communicationScope(page, platform) && (hasRecords || filtersSettled && emptyText.test(page.text ?? ''))) break
+          (personRow(item) || communication.recordSeed?.(item) || item.href && communicationIdentityTokens(platform, item, page.url).some(token => !token.startsWith('url:')) || targets.some(target => normalized(item.name) === normalized(target.name))))
+        if (communicationScope(page, platform) && (hasRecords || filtersSettled && emptyText.test(page.text ?? ''))) { listReady = true; break }
         if (attempt < 19) await delay(200, undefined, { signal })
       }
       const source = communicationScope(page, platform)
-      if (!source) { partial = true; continue }
+      if (!source || !listReady) { partial = true; continue }
       sourceCount++
-      const views: ('all' | 'greeted' | 'resume_received')[] = source === 'chat' ? ['all', 'greeted', 'resume_received'] : ['all']
+      // This action synchronizes received resumes: select the platform's
+      // receipt tab before reading people, including when saved facts exist.
+      const views: ('all' | 'resume_received')[] = source === 'chat' ? ['resume_received'] : ['all']
       for (const view of views) {
-        if (view === 'greeted' && [...facts.values()].every(row => row.greeted) || view === 'resume_received' && [...facts.values()].every(row => row.resumeReceived)) continue
         page = broker.currentPage()
-        const filterNames = view === 'greeted' ? ['我发起的', '我发起'] : view === 'resume_received' ? ['有简历', '已收简历', '收到简历'] : source === 'chat' ? ['全部', '全部沟通'] : []
+        const filterNames = communication.filters?.[view]
+          ?? (view === 'resume_received' ? ['有简历', '已收简历', '收到简历'] : [])
+        if (view !== 'all' && !filterNames.length) continue
         if (filterNames.length) {
           const filters = page.items.filter((item: any) => readable(item) && filterNames.includes(normalized(item.name))
             && !page.items.some((parent: any) => parent !== item && readable(parent) && normalized(parent.name) === normalized(item.name) && within(page, item, parent)))
@@ -235,6 +246,7 @@ export async function syncPlatformCommunication(broker: AgentBrowserTools, platf
         let previous = '', repeats = 0
         for (let screen = 0; screen < 12; screen++) {
           page = broker.currentPage()
+          assertPlatformPageLogin(page, platform, '同步平台简历')
           if (!communicationScope(page, platform)) { partial = true; break }
           let observations: CommunicationObservation[]
           try { observations = await readCommunicationObservations(platform, page, broker, targets, signal, view === 'all' ? undefined : view) }
@@ -245,6 +257,7 @@ export async function syncPlatformCommunication(broker: AgentBrowserTools, platf
             observations = await readCommunicationObservations(platform, page, broker, targets, signal, view === 'all' ? undefined : view)
           }
           for (const observation of observations) {
+            for (const token of observation.identityTokens) if (!token.startsWith('url:')) scanned.add(token)
             const matches = targets.filter(target => observation.identityTokens.some(token => targetTokens.get(target)!.has(token)))
             // An observation exposing conflicting IDs is ambiguous, even when
             // two candidates have the same display name or profile text.
@@ -271,12 +284,27 @@ export async function syncPlatformCommunication(broker: AgentBrowserTools, platf
       }
     }
   } catch (error) {
+    loginRequired = isPlatformLoginRequired(error)
     navigationUnknown = /OUTCOME_UNKNOWN|RESULT_UNKNOWN/.test(String(error)); throw error
   } finally {
-    if (!navigationUnknown) {
-      if (created && tab) await broker.tools.find(tool => tool.name === 'browser_close_tab')?.execute({ tabId: tab.tabId, purpose: 'navigation' }, AbortSignal.timeout(5000)).catch(() => { restoreFailed = true })
-      else if (restoreUrl && tab) await broker.tools.find(tool => tool.name === 'browser_navigate')?.execute({ tabId: tab.tabId, url: restoreUrl, purpose: 'navigation' }, AbortSignal.timeout(5000)).catch(() => { restoreFailed = true })
+    if (tab && !navigationUnknown && !loginRequired) {
+      const cleanupSignal = AbortSignal.timeout(5000)
+      try {
+        await broker.tools.find(tool => tool.name === 'browser_snapshot')!.execute({ tabId: tab.tabId, format: 'dom', viewportOnly: true }, cleanupSignal)
+        loginRequired = platformPageNeedsLogin(broker.currentPage())
+        if (!loginRequired) {
+          if (created) await broker.tools.find(tool => tool.name === 'browser_close_tab')?.execute({ tabId: tab.tabId, purpose: 'navigation' }, cleanupSignal)
+          else if (restoreUrl) await broker.tools.find(tool => tool.name === 'browser_navigate')?.execute({ tabId: tab.tabId, url: restoreUrl, purpose: 'navigation' }, cleanupSignal)
+        }
+      } catch { restoreFailed = true }
     }
   }
-  return { platform, matched: matched.size, updated: updated.size, detail: (!sourceCount ? '未识别到可读取的聊天或收到简历列表，已有状态保留' : partial ? '已同步可匹配记录；列表尚未读取完整，未匹配人选保持原状态' : '已同步平台可匹配记录') + (restoreFailed ? '；页面未能自动恢复，请手动返回' : '') }
+  const incomplete = partial && !complete()
+  const detail = !sourceCount ? '未能读取平台沟通或已收简历列表，请确认已登录后重试'
+    : loginRequired ? '平台需要登录或验证，页面已保留；完成后请手动再次点击“同步平台简历”'
+    : unidentified ? `已读取平台列表，${unidentified} 位历史候选人的身份信息不完整，暂时无法可靠关联，已有状态保留`
+    : incomplete ? '已同步可匹配记录；列表尚未读取完整，未匹配人选保持原状态' : '已同步平台可匹配记录'
+  return { platform, matched: matched.size, updated: updated.size, scanned: scanned.size, unidentified,
+    status: !sourceCount ? 'failed' : incomplete || unidentified || restoreFailed || loginRequired ? 'partial' : 'completed',
+    detail: detail + (restoreFailed ? '；页面未能自动恢复，请手动返回' : '') }
 }

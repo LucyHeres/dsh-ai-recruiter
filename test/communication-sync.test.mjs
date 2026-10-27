@@ -107,6 +107,38 @@ test('name-only and arbitrary DOM IDs do not match; explicit data IDs and proven
   }
 })
 
+test('BOSS reads timestamp-anchored chat rows by the observed geek-item UID, never a widget ID or name', async () => {
+  const target = { ...person('12345678', 'boss'), platformIdentity: undefined, profileUrl: `${origin('boss')}/web/geek/info?geekId=12345678` }
+  const items = [item('time', 'span', '13:08'), item('name', 'span', target.name)]
+  const observed = attrs => inspector({ time: { element: { tagName: 'span', attributes: { class: 'time' } },
+    ancestors: [{ tagName: 'div', attributes: attrs }] } })
+  const rows = await readCommunicationObservations('boss', page('boss', items), observed({ class: 'geek-item', id: '_12345678-0' }), [target], signal(), 'resume_received')
+  assert.ok(rows.some(row => row.identityTokens.includes('geek:12345678') && row.resumeReceived))
+  for (const attrs of [{ class: 'widget', id: '_12345678-0' }, { class: 'geek-item', id: '_12345678-1' }]) {
+    assert.deepEqual(await readCommunicationObservations('boss', page('boss', items), observed(attrs), [target], signal(), 'resume_received'), [])
+  }
+  const p = page('boss', [item('filter', 'div', '已获取简历'), item('request', 'button', '索要简历')])
+  assert.doesNotThrow(() => assertCommunicationRead({ name: 'browser_click', args: { ref: 'filter' }, purpose: 'navigation' }, p))
+  assert.throws(() => assertCommunicationRead({ name: 'browser_click', args: { ref: 'request' }, purpose: 'navigation' }, p), /READ_ONLY/)
+})
+
+test('BOSS enters its actual received-resume filter even when every saved candidate lacks an ID', async () => withStore(async store => {
+  const f = browserFixture('boss')
+  const target = { ...person('legacy1234', 'boss'), profileUrl: '', platformIdentity: undefined }
+  const result = await syncPlatformCommunication(f.broker, 'boss', [target], store, signal())
+  assert.ok(f.calls.some(call => call.name === 'browser_snapshot'))
+  assert.ok(f.calls.some(call => call.name === 'browser_click' && call.args.ref === 'filter-received'))
+  assert.equal(result.status, 'partial'); assert.equal(result.unidentified, 1)
+  assert.equal(result.matched, 0); assert.equal(result.updated, 0)
+  assert.deepEqual(await readCandidateContacts(store), [])
+}))
+test('BOSS still opens 已获取简历 when the candidate already has a saved receipt', async () => withStore(async store => {
+  const f = browserFixture('boss')
+  await syncPlatformCommunication(f.broker, 'boss', [{ ...person('resume1234', 'boss'), resumeReceived: true, communication: 'recorded' }], store, signal())
+  assert.deepEqual(f.calls.filter(call => call.name === 'browser_click').map(call => call.args.ref), ['filter-received'])
+  assert.ok(f.calls.findIndex(call => call.name === 'browser_click') < f.calls.findIndex(call => call.name === 'browser_inspect_element' && call.args.ref.startsWith('row-')))
+}))
+
 test('received-list wrapper strips only its observed row index and chat filters cannot annotate the adjacent receipt panel', async () => {
   const attrs = { class: 'manager-resume-card-item-new resume-item-wrap-resume_key_1234_7' }
   const items = [item('row', 'listitem', '同名候选人 30岁', { context: { text: '同名候选人 30岁' } }), item('age', 'span', '30岁', { parentRef: 'row' })]
@@ -160,7 +192,7 @@ function browserFixture(platform = 'liepin', options = {}) {
     const role = options.segmented ? radio ? 'radio' : 'label' : 'tab'
     const filter = (key, name, selectedView) => item(`${radio ? 'radio' : 'filter'}-${key}`, role, name,
       { states: options.segmented && !radio ? layoutSnapshots < 6 ? ['occluded'] : [] : view === selectedView && !options.unverifiedFilter ? [radio ? 'checked' : 'selected'] : [] })
-    return page(platform, [filter('all', '全部', 'all'), filter('greeted', '我发起的', 'greeted'), filter('received', '有简历', 'resume_received'), ...rows], path,
+    return page(platform, [filter('all', '全部', 'all'), ...(platform === 'liepin' ? [filter('greeted', '我发起的', 'greeted')] : []), filter('received', platform === 'boss' ? '已获取简历' : '有简历', 'resume_received'), ...rows], path,
       { format, ...(options.login ? { isLoginPage: true } : {}) })
   }
   const transport = async (name, args, toolSignal) => {
@@ -192,17 +224,18 @@ function browserFixture(platform = 'liepin', options = {}) {
   return { broker, calls, transport }
 }
 
-test('fixed reader syncs independent receipt and initiated-chat facts on both platforms without model calls', async () => withStore(async store => {
+test('resume sync reads only each platform receipt tab without inferring initiated greetings', async () => withStore(async store => {
   for (const platform of ['liepin', 'boss']) {
     const f = browserFixture(platform)
     const result = await syncPlatformCommunication(f.broker, platform, [person('resume1234', platform)], store, signal())
-    assert.equal(result.matched, 1); assert.equal(result.updated, 1, 'two facts update one person')
+    assert.equal(result.matched, 1); assert.equal(result.updated, 1)
     const records = await readCandidateContacts(store)
-    assert.equal(candidateCommunication(person('resume1234', platform), communicationIndex([], records)), 'recorded')
+    assert.equal(candidateCommunication(person('resume1234', platform), communicationIndex([], records)), 'none', 'receipt membership does not prove an initiated greeting')
     assert.equal(candidateResumeReceipt(person('resume1234', platform), records).resumeReceived, true)
     assert.equal(f.calls.at(-1).name, 'browser_navigate'); assert.match(f.calls.at(-1).args.url, /\/recommend$/)
     assert.ok(f.calls.every(call => call.args.policy.riskLevel !== 'business_write'))
-    assert.ok(f.calls.filter(call => call.name === 'browser_click').every(call => /^filter-/.test(call.args.ref)))
+    assert.ok(f.calls.filter(call => call.name === 'browser_click').every(call => call.args.ref === 'filter-received'))
+    assert.ok(f.calls.filter(call => call.name === 'browser_navigate').every(call => !new URL(call.args.url).pathname.includes('/resume/apply')))
   }
 }))
 
@@ -231,7 +264,7 @@ test('a pre-dispatch stale filter can rebind once; an unknown filter input stops
   const stale = browserFixture('boss', { staleFilter: true })
   const result = await syncPlatformCommunication(stale.broker, 'boss', [person('resume1234', 'boss')], store, signal())
   assert.equal(result.updated, 1)
-  assert.equal(stale.calls.filter(call => call.name === 'browser_click' && call.args.ref === 'filter-greeted').length, 2)
+  assert.equal(stale.calls.filter(call => call.name === 'browser_click' && call.args.ref === 'filter-received').length, 2)
   const unknown = browserFixture('boss', { unknownFilter: true })
   await assert.rejects(syncPlatformCommunication(unknown.broker, 'boss', [person('different5678', 'boss')], store, signal()), /OUTCOME_UNKNOWN/)
   assert.equal(unknown.calls.filter(call => call.name === 'browser_click').length, 1)
@@ -244,7 +277,9 @@ test('unverified selected filters, missing identity and same names cannot fabric
   assert.equal(result.updated, 0); assert.deepEqual(await readCandidateContacts(store), [])
   const missing = browserFixture('liepin')
   const noId = await syncPlatformCommunication(missing.broker, 'liepin', [{ ...person(), platformIdentity: undefined, profileUrl: '' }], store, signal())
-  assert.equal(noId.matched, 0); assert.equal(missing.calls.length, 0)
+  assert.equal(noId.matched, 0); assert.ok(missing.calls.some(call => call.name === 'browser_snapshot'))
+  assert.equal(noId.status, 'partial'); assert.equal(noId.unidentified, 1)
+  assert.ok(noId.scanned > 0, 'missing identity cannot bypass reading the platform')
   const names = browserFixture('boss')
   const sameName = await syncPlatformCommunication(names.broker, 'boss', [person('different9876', 'boss')], store, signal())
   assert.equal(sameName.matched, 0); assert.deepEqual(await readCandidateContacts(store), [])
@@ -255,11 +290,29 @@ test('created tab is closed, login failure preserves facts, and unknown navigati
   await syncPlatformCommunication(opened.broker, 'boss', [person('resume1234', 'boss')], store, signal())
   assert.equal(opened.calls.at(-1).name, 'browser_close_tab')
   const before = await readCandidateContacts(store), login = browserFixture('boss', { login: true })
-  await assert.rejects(syncPlatformCommunication(login.broker, 'boss', [person('different1234', 'boss')], store, signal()), /LOGIN_REQUIRED/)
-  assert.deepEqual(await readCandidateContacts(store), before); assert.equal(login.calls.at(-1).name, 'browser_navigate')
+  await assert.rejects(syncPlatformCommunication(login.broker, 'boss', [person('different1234', 'boss')], store, signal()), error => error.code === 'PLATFORM_LOGIN_REQUIRED')
+  assert.deepEqual(await readCandidateContacts(store), before); assert.equal(login.calls.at(-1).name, 'browser_snapshot')
+  const newLogin = browserFixture('boss', { login: true, newTab: true })
+  await assert.rejects(syncPlatformCommunication(newLogin.broker, 'boss', [person('different1234', 'boss')], store, signal()), error => error.code === 'PLATFORM_LOGIN_REQUIRED')
+  assert.equal(newLogin.calls.some(call => call.name === 'browser_close_tab'), false)
   const unknown = browserFixture('liepin', { unknownNavigation: true })
   await assert.rejects(syncPlatformCommunication(unknown.broker, 'liepin', [person()], store, signal()), /OUTCOME_UNKNOWN/)
   assert.equal(unknown.calls.filter(call => call.name === 'browser_navigate').length, 1)
+}))
+
+test('logged-out resume sync ends with an error and releases its lock; a manual retry starts normally', async () => withStore(async store => {
+  const id = randomUUID()
+  await store.put(`sourcing-${id}`, { id, kind: 'talent_sourcing', jobId: 'java', createdAt: '2026-10-20', candidates: [person('resume1234', 'boss')], results: [], status: 'completed', channels: [] })
+  const f = browserFixture('boss'), service = Object.create(Workbench.prototype), lease = []; let loggedIn = false
+  Object.assign(service, { store, initialized: Promise.resolve(), begin: async () => lease.push('begin'), browser: { listTools: async () => infos },
+    call: async (tool, args, s) => tool === 'browser_finish' ? lease.push('finish') : tool === 'browser_channel_login' ? { loggedIn } : f.transport(tool, args, s) })
+  const result = await service.syncCommunication({ jobId: 'java' }, signal())
+  assert.equal(result.platforms[0].status, 'failed'); assert.match(result.platforms[0].detail, /手动再次点击“同步平台简历”/)
+  assert.equal(service.operation, false); assert.deepEqual(lease, ['begin', 'finish'])
+  assert.ok(!f.calls.some(call => ['browser_navigate', 'browser_click', 'browser_close_tab'].includes(call.name)))
+  loggedIn = true; await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(lease, ['begin', 'finish'])
+  const retry = await service.syncCommunication({ jobId: 'java' }, signal())
+  assert.equal(retry.updated, 1); assert.deepEqual(lease, ['begin', 'finish', 'begin', 'finish'])
 }))
 
 test('workbench sync scopes candidates to position, releases ownership, and projects saved facts', async () => withStore(async store => {
@@ -277,4 +330,22 @@ test('workbench sync scopes candidates to position, releases ownership, and proj
   service.begin = async () => { throw new Error('LOGIN_REQUIRED') }
   await assert.rejects(service.syncCommunication({ jobId: 'java' }), /LOGIN_REQUIRED/)
   assert.equal(service.operation, false); assert.equal(lease.filter(row => row === 'finish').length, 1)
+}))
+
+test('workbench resume sync follows the selected round and excludes candidates absent from the qualified list', async () => withStore(async store => {
+  const oldId = randomUUID(), currentId = randomUUID()
+  const source = (id, candidates, createdAt) => ({ id, kind: 'talent_sourcing', jobId: 'java', createdAt, updatedAt: createdAt,
+    candidates, results: [], status: 'completed', channels: [], limit: 2, minimumScore: 60 })
+  await store.put(`sourcing-${oldId}`, source(oldId, [{ ...person('legacy1234', 'boss'), platformIdentity: undefined, profileUrl: '' }], '2026-10-20'))
+  await store.put(`sourcing-${currentId}`, source(currentId, [person('resume1234', 'boss'), { ...person('rejected1234', 'boss'), score: 40 }], '2026-10-21'))
+  const f = browserFixture('boss'), service = Object.create(Workbench.prototype)
+  Object.assign(service, { store, initialized: Promise.resolve(), begin: async () => {}, browser: { listTools: async () => infos },
+    call: async (...args) => args[0] === 'browser_finish' ? {} : f.transport(...args) })
+  const result = await service.syncCommunication({ jobId: 'java', roundId: currentId }, signal())
+  assert.equal(result.checked, 1); assert.equal(result.platforms[0].unidentified, 0); assert.equal(result.updated, 1)
+  const all = await service.syncCommunication({ jobId: 'java', roundId: 'all' }, signal())
+  assert.equal(all.checked, 2, 'all rounds still exclude rejected internal records')
+  assert.equal(all.platforms[0].unidentified, 1)
+  await assert.rejects(service.syncCommunication({ jobId: 'java', roundId: randomUUID() }, signal()), /没有这轮/)
+  assert.equal(service.operation, false)
 }))
