@@ -250,6 +250,27 @@ test('combination filters and preset sorting apply to candidates from all rounds
  select('air-filter-platform','boss');assert.equal(cards(view.render()).length,0);assert.match(text(view.render()),/暂无符合筛选/)
  button(view.render(),'查看全部').props.onClick();assert.equal(cards(view.render()).length,2)
 })
+test('talent search matches visible profile data, composes with filters and sorting, and can be cleared',()=>{
+ const candidates=[
+  {...summaries[0],name:'张三',fields:[{label:'公司',value:'星河科技'}],listProfile:{work:[{organization:'星河科技',description:'Java 开发'}],education:[{organization:'武汉大学'}]}},
+  {...summaries[1],name:'李四',fields:[{label:'公司',value:'星河科技'}],listProfile:{expectation:{city:'武汉',role:'Java 工程师'},work:[],education:[]}},
+ ]
+ const view=fixture({results:{...results,candidates}})
+ const search=value=>find(view.render(),row=>row.props['aria-label']==='搜索人才').props.onChange({target:{value}})
+ for(const [query,names] of [['张三',['张三']],['武汉大学',['张三']],['星河 ＪＡＶＡ',['李四','张三']],['  武汉  工程师  ',['李四']],['   ',['李四','张三']]]){
+  search(query);assert.deepEqual(cards(view.render()).map(card=>text(card).match(/张三|李四/)[0]),names)
+ }
+ search('星河 java')
+ find(view.render(),row=>row.props.id==='air-candidate-sort').props.onChange('score-asc')
+ assert.match(text(cards(view.render())[0]),/张三/)
+ find(view.render(),row=>row.props.id==='air-filter-score').props.onChange('70')
+ assert.equal(cards(view.render()).length,1);assert.match(text(cards(view.render())[0]),/李四/)
+ search('武汉大学');assert.equal(cards(view.render()).length,0);assert.match(text(view.render()),/暂无符合搜索条件/)
+ button(view.render(),'清空搜索').props.onClick();assert.equal(cards(view.render()).length,1,'clear keeps the score filter')
+ search('不存在');button(view.render(),'查看全部').props.onClick();assert.equal(cards(view.render()).length,2)
+ search('张三');find(view.render(),row=>row.props['aria-label']==='搜索人才').props.onKeyDown({key:'Escape',stopPropagation(){}})
+ assert.equal(cards(view.render()).length,2)
+})
 test('communication has only greeted/not-greeted and receipt filtering stays independent',()=>{
  const view=fixture({results:{...results,candidates:[{...summaries[0],communication:'uncertain',resumeReceived:true},{...summaries[1],communication:'recorded',resumeReceived:false}]}})
  const filter=(id,value)=>find(view.render(),row=>row.props.id===id).props.onChange(value)
@@ -257,10 +278,73 @@ test('communication has only greeted/not-greeted and receipt filtering stays ind
  assert.deepEqual(Array.from(communication.props.options,row=>row.label),['不限','已打招呼','未打招呼'])
  assert.doesNotMatch(text(view.render()),/招呼结果待确认|招呼待确认|无招呼记录/)
  filter('air-filter-resume-received','received');assert.equal(cards(view.render()).length,1)
- assert.match(text(cards(view.render())[0]),/未打招呼.*收到简历/)
+ assert.ok(find(cards(view.render())[0],row=>row.props['aria-label']==='未打招呼'))
+ assert.ok(find(cards(view.render())[0],row=>row.props['aria-label']==='获取简历已完成'))
  filter('air-filter-communication','recorded');assert.equal(cards(view.render()).length,0)
  button(view.render(),'查看全部').props.onClick();assert.equal(cards(view.render()).length,2)
- filter('air-filter-resume-received','not_received');assert.match(text(cards(view.render())[0]),/已打招呼.*未收到简历/)
+ filter('air-filter-resume-received','not_received')
+ assert.ok(find(cards(view.render())[0],row=>row.props['aria-label']==='打招呼已完成'))
+ assert.ok(find(cards(view.render())[0],row=>row.props['aria-label']==='未获取简历'))
+})
+test('resume progress uses observed independent states and only a successful attachment import lights the last node',()=>{
+ const cases=[
+  [{},[false,false,false]],
+  [{communication:'recorded'},[true,false,false]],
+  [{resumeReceived:true},[false,true,false]],
+  [{communication:'recorded',resumeReceived:true,resumeAttachments:[{id:'pending',fileName:'resume.pdf'}]},[true,true,false]],
+  [{resumeAttachments:[{id:'failed',fileName:'resume.pdf',uploadError:'提交失败'}]},[false,true,false]],
+  [{resumeAttachments:[{id:'stopped',fileName:'resume.pdf',uploadStopped:true}]},[false,true,false]],
+  [{resumeAttachments:[{id:'pending',fileName:'first.pdf'},{id:'saved',fileName:'saved.pdf',uploadedAt:'2026-10-29T08:00:00Z'}]},[false,true,true]],
+ ]
+ for(const [state,expected] of cases){
+  const person={...summaries[1],...state}
+  const view=fixture({results:{...results,candidates:[person]},detailData:{...details(1),candidate:{...people[1],...state}}})
+  const tree=view.render()
+  for(const scope of [cards(tree)[0],find(tree,row=>row.type==='article')]){
+   const flow=find(scope,row=>row.props.className==='air-resume-progress')
+   const steps=elements(flow).filter(row=>row?.type==='li')
+   assert.deepEqual(steps.map(step=>step.props.className.includes('is-complete')),expected)
+   assert.equal(steps.filter(step=>step.props.className.includes('is-connected')).length,expected.slice(1).filter((done,i)=>done&&expected[i]).length)
+   assert.equal(elements(flow).filter(row=>row?.type==='button').length,0,'status nodes cannot trigger a download or import')
+  }
+  const download=button(cards(tree)[0],'下载')
+  assert.equal(!!download,!!state.resumeAttachments?.length)
+  if(download)assert.match(download.props['aria-label'],new RegExp(person.resumeAttachments[0].fileName.replace('.', '\\.')))
+ }
+})
+test('candidate cards put identity, platform, progress and score together above basic facts and bounded history summaries',()=>{
+ const profile={age:'29 岁',expectation:{city:'武汉',role:'Java'},work:[{organization:'东风物流集团',description:'软件开发工程师',period:'2025.04-至今'},{organization:'江苏国光信息产业股份有限公司',description:'开发工程师',period:'2024.01-2025.04'}],education:[{organization:'华中师范大学',description:'软件工程 / 硕士 / 统招',period:'2019.09-2022.07'}]}
+ const candidate={...summaries[1],listProfile:profile,fields:[{label:'城市',value:'北京'},{label:'工作经验',value:'工作 4 年'},{label:'学历',value:'硕士'},{label:'当前职位',value:'软件开发工程师'},{label:'期望薪资',value:'16-17K'}]}
+ const card=cards(fixture({results:{...results,candidates:[candidate]}}).render())[0]
+ const heading=find(card,row=>row.props.className==='air-sourcing-person-heading')
+ assert.match(text(heading),/本轮候选人.*猎聘.*打招呼.*获取简历.*简历入库.*70/)
+ assert.doesNotMatch(text(heading),/东风物流|29岁|北京/)
+ const basics=find(card,row=>row.props['aria-label']==='基础信息')
+ assert.match(text(basics),/29岁.*4年.*硕士.*期望：.*武汉 · Java/)
+ assert.doesNotMatch(text(basics),/29 岁|工作|北京|软件开发工程师|16-17K/)
+ const work=find(card,row=>row.props['aria-label']==='工作经历'),education=find(card,row=>row.props['aria-label']==='教育经历')
+ assert.match(text(work),/东风物流集团.*软件开发工程师.*2025.04-至今.*江苏国光/)
+ assert.match(text(education),/华中师范大学.*软件工程 \/ 硕士 \/ 统招.*2019.09-2022.07/)
+ const empty=cards(fixture().render())[0]
+ assert.match(text(empty),/未展示\s*工作经历.*未展示\s*教育经历/)
+})
+test('narrow desktop panes retain the split interaction while only the compact drawer moves focus into detail',()=>{
+ for(const compact of [false,true]){
+  let focused=0,scrolled=0
+  const view=fixture({mobile:true},true,compact),tree=view.render()
+  const article=find(tree,row=>row.type==='article')
+  article.ref.current={closest:()=>({clientWidth:700}),focus:()=>focused++,scrollIntoView:()=>scrolled++}
+  view.effects().find(row=>row.deps?.length===2&&row.deps[0]===summaries[1].resultKey&&row.deps[1]===true).effect()
+  assert.equal(focused,compact?1:0)
+  assert.equal(scrolled,compact?1:0)
+  assert.equal(view.get('mobile'),true,'viewport width cannot clear the selected candidate')
+ }
+})
+test('the workbench exposes a keyboard-accessible drag separator and the conversation drawer does not',()=>{
+ const desktop=fixture().render(),separator=find(desktop,row=>row.props.role==='separator')
+ assert.equal(separator.props['aria-orientation'],'vertical')
+ assert.equal(separator.props.tabIndex,0)
+ assert.equal(find(fixture({},true,true).render(),row=>row.props.role==='separator'),undefined)
 })
 test('sync reads the selected position, disables reentry and refreshes result/detail data',async()=>{
  let finish
@@ -283,7 +367,7 @@ test('failed/aborted sync preserves received data and changing position aborts o
  assert.match(text(failed.render()),/请先登录平台/);assert.equal(failed.get('syncing'),false)
  assert.equal(find(failed.render(),row=>row.props.className==='air-feedback-toast is-error').props.role,'alert')
  assert.equal(failed.get('error'),'','sync failure also uses a transient toast')
- assert.ok(cards(failed.render()).every(row=>/(?:^| )收到简历(?: |$)/.test(text(row))))
+ assert.ok(cards(failed.render()).every(row=>find(row,item=>item.props['aria-label']==='获取简历已完成')))
  let finish
  const view=fixture({},false,false,{rpc:()=>new Promise(resolve=>{finish=resolve})})
  view.render();const cleanup=view.effects().find(row=>row.deps?.length===1&&row.deps[0]==='java').effect()

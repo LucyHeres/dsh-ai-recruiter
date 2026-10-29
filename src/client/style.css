@@ -82,8 +82,9 @@
 .air-extension-banner > svg { color: var(--air-accent); }
 .air-extension-banner strong { font-size: 13px; font-weight: 600; }
 .air-extension-banner p { color: var(--air-secondary); font-size: 12px; }
-.air-workbench .air-extension-guide { width: 460px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 48px); overflow: auto; margin: auto; padding: 24px; border: 1px solid var(--air-border); border-radius: 12px; background: var(--air-surface); color: var(--air-ink); font: inherit; box-shadow: 0 16px 48px rgb(0 0 0 / 15%); }
-.air-extension-guide::backdrop { background: rgb(15 23 42 / 30%); }
+.air-plugin-surface { position: relative; isolation: isolate; width: 100%; height: 100%; min-width: 0; overflow: hidden; }
+.air-workbench.air-extension-overlay { position: absolute; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px 16px; overflow: hidden; background: rgb(15 23 42 / 30%); }
+.air-workbench .air-extension-guide { width: 460px; max-width: 100%; max-height: 100%; min-width: 0; overflow: auto; margin: 0; padding: 24px; border: 1px solid var(--air-border); border-radius: 12px; background: var(--air-surface); color: var(--air-ink); font: inherit; box-shadow: 0 16px 48px rgb(0 0 0 / 15%); }
 .air-extension-guide header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
 .air-extension-guide-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; color: var(--air-accent); background: var(--air-accent-soft); }
 .air-extension-guide-icon svg { width: 22px; height: 22px; }
@@ -96,6 +97,9 @@
 .air-extension-guide .air-extension-guide-notice { margin: -8px 0 16px; color: var(--air-warning); }
 .air-session-panel .air-extension-banner { grid-template-columns: auto minmax(0, 1fr); padding: 12px; }
 .air-session-panel .air-extension-banner button { grid-column: 2; justify-self: start; }
+@container recruiter (max-width: 480px) {
+  .air-extension-guide-actions { grid-template-columns: 1fr; }
+}
 @media (max-width: 480px) {
   .air-extension-banner { grid-template-columns: auto minmax(0, 1fr); }
   .air-extension-banner button { grid-column: 2; justify-self: start; }
@@ -703,12 +707,6 @@ details.air-sourcing-analysis[open] > summary { margin-bottom: 10px; }
   .air-sourcing-run { gap: 8px; }
   .air-sourcing-phase { flex-basis: 100%; }
   .air-page:has(> .air-sourcing), .air-sourcing { flex: none; }
-  .air-sourcing-results { grid-template-columns: minmax(0, 1fr); flex: none; min-height: 0; height: auto; }
-  .air-sourcing-list { border-right: 0; }
-  .air-sourcing-results .air-sourcing-detail, .air-sourcing-detail-placeholder { display: none; }
-  .air-sourcing-results.is-detail-open .air-sourcing-detail { display: block; }
-  .air-sourcing-results.is-detail-open .air-sourcing-list { display: none; }
-  .air-sourcing-back { display: inline-flex; margin-bottom: 10px; }
   .air-sourcing-detail-header, .air-sourcing-detail-footer { position: static; }
   .air-sourcing-score strong { font-size: 20px; }
 }
@@ -769,7 +767,16 @@ details.air-sourcing-analysis[open] > summary { margin-bottom: 10px; }
 .air-talent-resume-tools .air-button { min-height: 32px; }
 .air-sourcing-filterbar { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .air-sourcing-filter-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.air-sourcing-filterbar > .air-select-menu { flex-shrink: 0; }
+.air-talent-search-sort { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: auto; }
+.air-talent-search-sort > .air-select-menu { flex-shrink: 0; }
+.air-talent-search { display: flex; align-items: center; gap: 7px; width: 200px; min-width: 100px; height: 32px; padding: 0 9px; border: 1px solid var(--air-divider); border-radius: 5px; background: var(--air-surface); color: var(--air-muted); }
+.air-talent-search > svg { width: 14px; height: 14px; flex-shrink: 0; }
+.air-talent-search input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--air-ink); font: inherit; font-size: 12px; }
+.air-talent-search input::placeholder { color: var(--air-muted); opacity: 1; }
+.air-talent-search input::-webkit-search-cancel-button { display: none; }
+.air-talent-search > button { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 20px; height: 24px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--air-muted); cursor: pointer; }
+.air-talent-search > button:hover { background: var(--air-soft); color: var(--air-ink); }
+.air-talent-search > button svg { width: 12px; height: 12px; }
 .air-sourcing-filterbar .air-select-trigger, .air-talent-filters > summary { min-height: 32px; gap: 8px; padding: 5px 10px; font-size: 12px; border: 1px solid var(--air-divider); border-radius: 5px; background: var(--air-surface); color: var(--air-secondary); }
 .air-sourcing-filterbar .air-select-trigger:hover, .air-talent-filters > summary:hover { border-color: var(--air-border); background: var(--air-soft); }
 .air-talent-sort .air-select-trigger { display: inline-flex; align-items: center; height: 32px; padding-block: 0; border-color: transparent; background: transparent; color: var(--air-muted); line-height: 20px; }
@@ -999,10 +1006,19 @@ details.air-sourcing-analysis[open] > summary { margin-bottom: 10px; }
 .air-hunt-events li > span { min-width: 0; overflow-wrap: anywhere; }
 
 /* Candidate selection uses a local edge rather than a large tint. */
-.air-sourcing-results { grid-template-columns: minmax(300px, .72fr) minmax(0, 1.6fr); min-height: 360px; border-radius: 6px; background: var(--air-surface); }
-.air-sourcing-person { gap: 5px; padding: 10px 12px 10px 10px; border-left-width: 2px; }
+.air-sourcing-results { grid-template-columns: minmax(500px, 1.3fr) minmax(0, 1fr); min-height: 360px; border-radius: 6px; background: var(--air-surface); }
+/* Desktop resizing preserves the selected resume beside the candidate list.
+   Only the conversation drawer owns the list/detail switching interaction. */
+.air-sourcing:not(.is-compact) > .air-sourcing-results { min-width: 702px; grid-template-columns: var(--air-list-width, minmax(380px, 1.3fr)) 0 minmax(320px, 1fr); }
+.air-sourcing:not(.is-compact) .air-sourcing-list { border-right: 0; }
+.air-sourcing-splitter { position: relative; z-index: 3; width: 8px; min-width: 0; margin-inline-start: -4px; align-self: stretch; cursor: col-resize; touch-action: none; }
+.air-sourcing-splitter::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: var(--air-divider); }
+.air-sourcing-splitter:hover::before, .air-sourcing-splitter:focus-visible::before, .is-resizing > .air-sourcing-splitter::before { background: var(--air-accent); }
+.air-sourcing-results.is-resizing, .air-sourcing-results.is-resizing * { cursor: col-resize !important; user-select: none !important; }
+.air-sourcing-list { container: candidate-list / inline-size; }
+.air-sourcing-person { gap: 14px; padding: 14px 16px 14px 14px; border-left-width: 2px; }
 .air-sourcing-person.is-selected { background: var(--air-accent-soft); }
-/* A stretched name button selects the card; the receipt tag downloads separately. */
+/* A stretched name button selects the card; the download action stays above it. */
 .air-sourcing-person-row { position: relative; background: var(--air-surface); }
 .air-sourcing-person-row:hover { background: var(--air-accent-soft); }
 .air-sourcing-person-row.is-selected { background: var(--air-accent-soft); }
@@ -1011,13 +1027,64 @@ details.air-sourcing-analysis[open] > summary { margin-bottom: 10px; }
 .air-sourcing-person-select::after { content: ''; position: absolute; inset: 0; }
 .air-workbench .air-sourcing-person-select:focus-visible { outline: 0; }
 .air-sourcing-person-select:focus-visible::after { outline: 2px solid var(--air-accent); outline-offset: -2px; }
-.air-sourcing-person .air-contact-tag { display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border: 1px solid; border-radius: 999px; font-size: 10px; font-weight: 400; line-height: 17px; white-space: nowrap; }
-.air-contact-tag svg { width: 11px; height: 11px; }
-.air-contact-tag.is-greeted { border-color: light-dark(#cfe9d9, #2f5943); background: light-dark(#edf8f1, #18362a); color: light-dark(#176a41, #82d6a7); }
-.air-contact-tag.is-received { position: relative; z-index: 1; border-color: light-dark(#e4d7fb, #594270); background: var(--air-accent-soft); color: var(--air-accent); }
-button.air-contact-tag:hover:enabled { border-color: var(--air-accent); background: var(--air-accent-soft); }
-button.air-contact-tag:active:enabled { transform: translateY(1px); }
-button.air-contact-tag:disabled { opacity: .65; }
+.air-sourcing-person .air-sourcing-person-heading { display: grid; grid-template-columns: fit-content(160px) minmax(0, 1fr) auto; gap: 14px; }
+.air-sourcing-person-heading > .air-resume-progress { justify-self: start; margin-inline-start: 4px; }
+.air-sourcing-person .air-sourcing-person-identity { flex-wrap: nowrap; gap: 6px; }
+.air-sourcing-person-select { min-width: 0; }
+.air-sourcing-person-select b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.air-person-overview { display: grid; grid-template-columns: minmax(0, .75fr) minmax(0, 1.6fr); gap: 20px; }
+.air-person-basics { display: grid; align-content: start; gap: 8px; min-width: 0; font-size: 12px; font-weight: 400; color: var(--air-ink); }
+.air-person-basics, .air-person-basics * { text-autospace: no-autospace !important; }
+.air-person-basic-line { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 10px; min-width: 0; overflow: hidden; }
+.air-person-basic-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.air-person-expectation { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.air-person-expectation-label { color: var(--air-muted); }
+.air-person-current-company { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.air-person-histories { display: grid; gap: 10px; min-width: 0; }
+.air-person-history { --air-history-mark: var(--air-muted); display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 7px; min-width: 0; color: var(--air-secondary); font-size: 11px; line-height: 1.6; }
+.air-person-history.is-work { --air-history-mark: light-dark(#bbc1cb, #727c8d); }
+.air-person-history > svg { width: 13px; height: 13px; margin-top: 2px; color: var(--air-history-mark); }
+.air-person-history ul { min-width: 0; }
+.air-person-history li { position: relative; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .9fr) minmax(0, 1.1fr); align-items: baseline; gap: 8px; min-width: 0; }
+.air-person-history.is-work li { display: flex; gap: 16px; }
+.air-person-history li + li { margin-top: 7px; }
+.air-person-history li + li::before { content: ''; position: absolute; left: -14px; top: -16px; width: 1px; height: 24px; background: var(--air-history-mark); }
+.air-person-history.is-work li + li::before { top: -6px; width: 0; height: 12px; border-left: 1px dashed var(--air-history-mark); background: none; }
+.air-person-history li + li::after { content: ''; position: absolute; left: -16px; top: 6px; width: 5px; height: 5px; border-radius: 50% !important; corner-shape: round !important; background: var(--air-history-mark); }
+.air-person-history-text { display: contents; }
+.air-person-history-text > span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.air-person-history-text > span:first-child { color: var(--air-ink); }
+.air-person-history-period, .air-person-history-empty { color: var(--air-muted); }
+.air-person-history-period { grid-column: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.air-person-download-row { display: flex; justify-content: flex-end; margin-top: -6px; }
+.air-workbench .air-resume-progress { display: flex; align-items: center; gap: 0; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.air-resume-progress-step { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--air-muted); font-size: 11px; line-height: 20px; white-space: nowrap; }
+.air-resume-progress-step > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.air-resume-progress-step + .air-resume-progress-step::before { content: ''; flex: none; width: 16px; height: 1px; margin-inline: 6px; background: var(--air-border); }
+.air-resume-progress-step.is-complete { color: var(--air-accent); }
+.air-resume-progress-step.is-connected::before { background: var(--air-accent); }
+.air-workbench .air-resume-progress-node { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex: 0 0 12px; width: 12px; height: 12px; min-width: 12px; min-height: 12px; padding: 0; border: 1px solid var(--air-border); border-radius: 50% !important; corner-shape: round !important; background: var(--air-soft); }
+.air-resume-progress-step.is-complete .air-resume-progress-node { border-color: var(--air-accent); background: var(--air-accent); color: var(--air-accent-text); }
+.air-resume-progress-node svg { width: 9px; height: 9px; }
+.air-person-download { position: relative; z-index: 1; margin-left: auto; }
+.air-person-download:active:enabled { transform: translateY(1px); }
+.air-sourcing-detail { container: resume-detail / inline-size; }
+.air-sourcing-detail-header > .air-resume-progress { margin-top: 8px; }
+@container resume-detail (max-width: 320px) {
+  .air-resume-progress-step { gap: 3px; }
+  .air-resume-progress-step + .air-resume-progress-step::before { width: 8px; margin-inline: 2px; }
+}
+@container candidate-list (max-width: 500px) {
+  .air-sourcing-person .air-sourcing-person-heading { grid-template-columns: fit-content(90px) minmax(0, 1fr) auto; gap: 8px; }
+  .air-sourcing-person-heading > .air-resume-progress { max-width: 100%; }
+  .air-sourcing-person-heading .air-resume-progress-step { gap: 3px; }
+  .air-sourcing-person-heading .air-resume-progress-step + .air-resume-progress-step::before { width: 6px; margin-inline: 2px; }
+  .air-person-overview { grid-template-columns: minmax(0, .8fr) minmax(0, 1.5fr); gap: 12px; }
+}
+@container candidate-list (max-width: 360px) {
+  .air-person-overview { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .air-person-basic-line { gap: 4px 8px; }
+}
 .air-attachment-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 20px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--air-accent); font-size: 11px !important; line-height: 20px !important; white-space: nowrap; }
 .air-attachment-trigger svg { width: 13px; height: 13px; }
 .air-attachment-trigger:hover:not(:disabled):not([aria-disabled="true"]) { color: var(--air-accent-hover); text-decoration: underline; text-underline-offset: 3px; }
@@ -1036,7 +1103,6 @@ button.air-contact-tag:disabled { opacity: .65; }
 .air-sourcing-person-heading strong small { font: 10px var(--air-number-font); }
 .air-sourcing-person-identity { gap: 4px; }
 .air-platform-tag { padding: 0 4px; border-radius: 3px; font-size: 10px; line-height: 17px; }
-.air-person-contact { color: var(--air-muted); font-size: 10px; white-space: nowrap; }
 .air-sourcing-person-role { display: flex; min-width: 0; gap: 8px; font-size: 12px; line-height: 1.5; }
 .air-sourcing-person-role > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .air-sourcing-person-role > span:first-child { flex-shrink: 0; max-width: 55%; }
@@ -1139,7 +1205,7 @@ button.air-contact-tag:disabled { opacity: .65; }
 .air-resume-live > span { display: inline-flex; gap: 8px; align-items: center; }
 @container recruiter (max-width: 1100px) {
   .air-position-home { --air-position-columns: minmax(200px, 1fr) repeat(3, 78px) 96px; }
-  .air-sourcing-results { grid-template-columns: minmax(290px, .8fr) minmax(0, 1.4fr); }
+  .air-sourcing-results { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
 }
 @container recruiter (max-width: 800px) {
   .air-position-columns { display: none; }
@@ -1173,7 +1239,8 @@ button.air-contact-tag:disabled { opacity: .65; }
   .air-talent-heading-copy { width: 100%; }
   .air-talent-resume-tools { width: 100%; margin-left: 0; justify-content: flex-start; gap: 12px; }
   .air-sourcing-filterbar { flex-wrap: wrap; gap: 8px; }
-  .air-sourcing-filterbar > .air-select-menu { margin-left: auto; }
+  .air-talent-search-sort { flex: 1 1 100%; }
+  .air-talent-search { flex: 1; width: auto; min-width: 0; }
   .air-sourcing-filterbar .air-select-trigger { gap: 5px; padding-inline: 8px; }
   .air-sourcing-filter-controls > .air-select-menu { max-width: calc(100cqw - 140px); }
   .air-hunt-progress-header { padding: 8px 10px; flex-wrap: nowrap; gap: 8px; }
@@ -1185,7 +1252,6 @@ button.air-contact-tag:disabled { opacity: .65; }
   .air-hunt-metrics { gap: 6px 14px; }
   .air-hunt-progress .air-sourcing-execution { grid-column: 1 / -1; grid-row: auto; width: 100%; }
   .air-sourcing-run-meta { display: none; }
-  .air-sourcing-results { grid-template-columns: minmax(0,1fr); height: auto; }
   .air-sourcing-settings-panel .air-sourcing-requirements { grid-template-columns: minmax(0,1fr); gap: 16px; padding: 16px; }
   .air-sourcing-settings { padding: 14px 0 0; }
   .air-sourcing-detail-header { padding: 10px 12px; }
@@ -1195,6 +1261,8 @@ button.air-contact-tag:disabled { opacity: .65; }
 
 @container recruiter (max-width: 380px) {
   .air-hunt-progress-header { flex-wrap: wrap; }
+  .air-resume-progress-step { gap: 4px; }
+  .air-resume-progress-step + .air-resume-progress-step::before { width: 10px; margin-inline: 3px; }
 }
 
 .air-data-body { padding: 8px 24px 24px; overflow-y: auto; }

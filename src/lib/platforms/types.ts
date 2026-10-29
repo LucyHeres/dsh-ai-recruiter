@@ -93,6 +93,8 @@ export interface PlatformDefinition {
 /** Website paths, prompts and custom controls have one owner. Workflow code
  * consumes this contract and never selects an implementation by hostname. */
 export interface RecruitmentPlatform {
+  /** Platform-specific display excerpts from captured card/resume text. */
+  listProfile?(resumeText: string, listText: string): Pick<import('../../shared/sourcing.js').CandidateListProfile, 'work' | 'education' | 'expectation'>
   receivedAttachment?: {
     acceptsUrl(url: URL): boolean
     refresh(broker: AgentBrowserTools, candidate: SourcingCandidate, row: ReceivedResumeRecord, store: Store, signal: AbortSignal,

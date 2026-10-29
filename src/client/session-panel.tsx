@@ -161,7 +161,7 @@ export function SessionRecruitmentPanel({ sessionId, rpc, openWorkbench }: Props
       if (mounted.current) setCopied(job.id)
     })
   }
-  return <section className="air-workbench air-session-panel">
+  return <div className="air-plugin-surface"><section className="air-workbench air-session-panel">
     <style>{styles}{panelStyles}</style>
     <header className="air-session-heading">
       <label htmlFor="air-session-position">职位</label>
@@ -176,8 +176,7 @@ export function SessionRecruitmentPanel({ sessionId, rpc, openWorkbench }: Props
       {!state && !error ? <p className="air-session-empty" role="status">正在读取当前会话任务…</p> : position ? <SourcingPanel key={sessionId + ':' + position.id} compact positions={options} positionId={position.id} executionId={executionId} rpc={rpc} state={workbench} locked={locked} pending={!!pending.current && !busy} busy={busy} onStart={start} onReconcile={reconcile} onRequireExtension={setup.show} /> : <div className="air-session-empty"><h3>从一个职位开始招聘</h3><p>{preferred ? '最近涉及的职位暂不可用，请从上方重新选择。' : '选择上方职位，或在对话里说明要招聘的职位。'}</p></div>}
     </div>
     {(!!state?.calls?.length || !!latest) && <details className="air-session-diagnostics"><summary>执行记录 <span>{state?.calls?.length || 0}</span><ChevronDownIcon aria-hidden="true" /></summary>{latest && <div className="air-session-log-action"><span>{taskFeature(latest.kind).label} · {latest.status === 'unknown' && latest.kind !== 'resume_import' ? '已停止' : statusLabels[latest.status]}</span><button type="button" className="air-text-button" disabled={!!busy} onClick={() => copyLog(latest)}>{copied === latest.id ? '日志已复制' : '复制操作日志'}</button></div>}<h3 className="air-session-diagnostic-label">工具调用记录</h3><ol className="air-session-calls">{(state?.calls || []).slice(0, 8).map((call, index) => <li key={call.at + index}><time>{new Date(call.at).toLocaleTimeString('zh-CN', { hour12: false })}</time><strong>{call.summary}</strong><span>{call.ok ? `${call.durationMs} ms` : `失败${call.code ? ` · ${call.code}` : ''}`}</span></li>)}</ol></details>}
-    {setup.guide}
-  </section>
+  </section>{setup.guide}</div>
 }
 
 function LegacyTask({ job, busy, copied, onStop, onCopy }: { job: WorkbenchJob; busy: boolean; copied: string; onStop: () => void; onCopy: () => void }) {

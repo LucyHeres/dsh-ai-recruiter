@@ -187,7 +187,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
     setInspectedTask(job); setSelectedKind(job.kind); setSelected(previous => ({ ...previous, [job.kind]: job.id }))
   }
 
-  return <div className="air-workbench">
+  return <div className="air-plugin-surface"><div className="air-workbench">
     <style>{styles}</style>
     <header className="air-header">
       <div className="air-header-inner">
@@ -233,7 +233,6 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
       {position && knownJobs.some(job => job.id === state?.activeJobId && job.kind === 'resume_import' && (job as WorkbenchJob & {jobId?: string}).jobId === position.id) && <div className="air-resume-live"><span><span className="air-status-dot" />简历正在入库到当前职位</span><button className="air-text-button" type="button" onClick={() => { setSelectedKind('resume_import'); setSelected(previous => ({...previous,resume_import:state?.activeJobId || ''})); setActivityOpen(true) }}>查看入库进度<ArrowRightIcon aria-hidden="true" /></button></div>}
       {position ? <SourcingPanel key={`${position.id}:${dataRevision}`} positionId={position.id} rpc={rpc} state={state} locked={locked} pending={needsReconcile} busy={busy} blockingReason={blockingReason} onStart={settings => startTask(settings, 'talent_sourcing')} onReconcile={reconcileTask} onRequireExtension={setup.show} selectedTaskId={selected.talent_sourcing} selectedRecord={inspectedTask?.kind === 'talent_sourcing' ? inspectedTask : undefined} /> : <PositionHome key={dataRevision} rpc={rpc} onRecruit={job => { setPosition(job); setInspectedTask(undefined); setSelectedKind('talent_sourcing') }} />}
     </div>
-    {setup.guide}
     {activityOpen && <SidePanel title={current?.kind === 'resume_import' ? '简历入库进度' : '任务详情'} onClose={() => setActivityOpen(false)} className="air-task-activity-panel">
         <section className="air-activity" aria-labelledby="air-activity-title">
           <div className="air-section-heading air-activity-heading"><div><h2 id="air-activity-title">执行进度</h2>{current && <p className="air-task-meta">{resultFeature.label} · {PLATFORMS[current.platform].label}<time dateTime={current.createdAt}>{formatTime(current.createdAt)}</time></p>}</div>
@@ -261,7 +260,7 @@ function WorkbenchPage({ rpc, navigation }: PropsRuntime<'main'> & { rpc: Rpc; n
         </section></SidePanel>}
     {recordsOpen && <TaskRecords rpc={rpc} onClose={() => setRecordsOpen(false)} onSelect={inspectTask} onCopyLog={copyTaskLog} busy={busy} copiedId={copiedLogTask} selectedId={current?.id} />}
     {dataOpen && <DataManagement rpc={rpc} locked={occupied || !!busy} onClose={() => setDataOpen(false)} onCleared={() => { setInspectedTask(undefined); setActivityOpen(false); setSelected({}); setDataRevision(value => value + 1); void rpc<WorkbenchState>('state').then(setState).catch(() => {}) }} />}
-  </div>
+  </div>{setup.guide}</div>
 }
 
 function BrowserConnectionPopover({ status, children }: { status: ReturnType<typeof browserConnectionStatus>; children: React.ReactNode }) {

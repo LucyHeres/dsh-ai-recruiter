@@ -1,6 +1,7 @@
 import { SourcingGreeting, sourcingGreetingSpec } from '../sourcing-greeting.js'
 import type { GreetingPolicy } from '../greeting-policy.js'
 import { z } from 'zod'
+import { candidateListProfile } from '../candidate-list-profile.js'
 import { pageSpec, rubricRequirementsSpec, selectionSpec, readResumeSpec, recordSpec } from './contracts.js'
 import { sourcingSystem } from './prompts.js'
 import { AgentBrowserTools } from '../agent-browser-tools.js'
@@ -15,7 +16,7 @@ import { platformIdentityKey } from '../candidate-identity.js'
 import type { PlatformCandidateIdentity } from '../../shared/workbench.js'
 import { itemText, normalized, readableIdentityRef, safePageUrl, statesOf } from '../page-actions.js'
 import { safeError } from '../task-error.js'
-import { assessCandidate, assertSourcingNavigation, assertSourcingResumeDetail, mergeSourcingResumeParts, sourcingResumeDialog, sourcingResumeParts, SourcingSearchTracker, sourcingSource, validateCriteria, validateSupplementCoverage } from '../sourcing-policy.js'
+import { assessCandidate, assertSourcingNavigation, inspectedSourcingClose, assertSourcingResumeDetail, mergeSourcingResumeParts, sourcingResumeDialog, sourcingResumeParts, SourcingSearchTracker, sourcingSource, validateCriteria, validateSupplementCoverage } from '../sourcing-policy.js'
 import { PLATFORMS } from '../../shared/workbench.js'
 import type { SourcingJob, SourcingListAssessment } from '../../shared/sourcing.js'
 import { sourcingMinimumScore, sourcingTotalTarget, sourcingQualifiedCount } from '../../shared/sourcing-score.js'
@@ -101,7 +102,8 @@ export async function createSourcingSession(ctx: SessionOptions) {
       const positionControl = positionRoute.allowsChoice(call, page) || !!searchControl
       validationStage = 'navigation_policy'
       assertSourcingNavigation(call, page, pending?.name, searchTracker.hasFocusedSearch(call, page),
-        positionControl, !!(call.args.ref && platform.allowsNavigation?.(page, call.args.ref, broker)))
+        positionControl, !!(call.args.ref && (platform.allowsNavigation?.(page, call.args.ref, broker)
+          || inspectedSourcingClose(page, String(call.args.ref), broker.getInspection(page, String(call.args.ref))))))
       const selectedCandidate = pending ?? job.candidates.find(person => person.key === greeter.awaiting)
       if (!call.readOnly && ['browser_click', 'browser_hover'].includes(call.name)) {
         const target = readableIdentityRef(page, String(call.args.ref || ''))
@@ -400,7 +402,7 @@ export async function createSourcingSession(ctx: SessionOptions) {
     const scope = 'online' as const
     const candidateKey = pending.key
     job.candidates.push({ name: pending.name, key: pending.key, ...(pending.identityAliases.length ? { identityAliases: pending.identityAliases } : {}), profileUrl: pending.profileUrl, platformIdentity: pending.platformIdentity, platform: channel.platform, sourceUrl: safePageUrl(page.url), collectedAt: now(), scope, resumeTruncated: truncated,
-      fields: input.fields, resumeText, ...(capture.evidence ? { resumeEvidence: capture.evidence } : {}), listAssessments: pending.listAssessments, assessments: input.assessments, filterAssessments: input.filterAssessments, analysis: input.analysis, ...assessment })
+      fields: input.fields, listProfile: candidateListProfile(resumeText, pending.listText, channel.platform), resumeText, ...(capture.evidence ? { resumeEvidence: capture.evidence } : {}), listAssessments: pending.listAssessments, assessments: input.assessments, filterAssessments: input.filterAssessments, analysis: input.analysis, ...assessment })
     channel.candidateCount = qualifiedCount() - before
     job.results.push({ key: pending.key, name: pending.name, stage: 'succeeded', detail: `匹配 ${assessment.score}/100 · ${assessment.coverage < 100 ? '达标，部分材料未说明' : '已读原文评估'}`, updatedAt: now() })
     greeter.queue(job.candidates[job.candidates.length - 1], pending.identity, page, foregroundSource)

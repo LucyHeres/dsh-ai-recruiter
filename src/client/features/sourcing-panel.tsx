@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ArrowLeftIcon, ArrowRightIcon, GearIcon, ChevronDownIcon, ExternalLinkIcon, PlayIcon, ReloadIcon, StopIcon, DownloadIcon, FileTextIcon, ChatBubbleIcon, UploadIcon, MixerHorizontalIcon, CheckCircledIcon, ExclamationTriangleIcon } from '@radix-ui/react-icons'
+import { ArrowLeftIcon, ArrowRightIcon, GearIcon, ChevronDownIcon, ExternalLinkIcon, PlayIcon, ReloadIcon, StopIcon, DownloadIcon, FileTextIcon, CheckIcon, UploadIcon, MixerHorizontalIcon, CheckCircledIcon, ExclamationTriangleIcon, BackpackIcon, ReaderIcon, MagnifyingGlassIcon, Cross2Icon } from '@radix-ui/react-icons'
 import { PLATFORMS, type JobOption, type Platform, type WorkbenchJob, type WorkbenchState } from '../../shared/workbench.js'
 import { SelectMenu } from '../components/select-menu.js'
 import { SidePanel } from '../components/side-panel.js'
 import { JobDescription } from '../components/job-description.js'
-import type { CommunicationSyncResult, SourcingCandidateDetail, SourcingJob, SourcingPosition, SourcingResults, SourcingResultCandidate, ReceivedResumeAttachment, ResumeDownloadChunk } from '../../shared/sourcing.js'
+import type { CommunicationSyncResult, SourcingCandidateDetail, SourcingJob, SourcingPosition, SourcingResults, SourcingResultCandidate, ReceivedResumeAttachment, ResumeDownloadChunk, CandidateListProfile } from '../../shared/sourcing.js'
 import { readResumeDownload } from '../received-resume-download.js'
 import { sourcingRunNotice } from '../../shared/sourcing-status.js'
 import { communicationLabels, communicationState, greetingLabel, greetingDetail, greetingNotice, hasGreeted } from '../../shared/communication.js'
@@ -13,11 +13,11 @@ import { sourcingPlatformsForChannels } from '../../shared/published-channels.js
 import { renderPlatformTag } from '../components/platform-tag.js'
 import { defaultSourcingSettings, SOURCING_MAX_LIMIT, withSourcingJobDescription, type SourcingSettings } from '../../shared/sourcing-settings.js'
 import { isExtensionRequired, extensionNeedsSetup, extensionSetupMessage } from '../../shared/connection-status.js'
+import { useResizableSplit } from '../components/resizable-split.js'
 
 type Rpc = <T>(method: string, request?: unknown, signal?: AbortSignal) => Promise<T>
 const stamp = (s: string) => new Date(s).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 const roundStamp = (s: string) => new Date(s).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-const primaryField = (label: string) => /职位|岗位|公司|企业/.test(label)
 const states = { queued: '等待执行', running: '寻聘中', stopping: '停止中', completed: '本轮完成', stopped: '已停止', failed: '未完成', unknown: '已停止' }
 const matches = { match: '符合', partial: '部分符合', mismatch: '明确不符', unknown: '材料未说明' }
 const phases: Record<string, string> = { connecting: '正在连接浏览器扩展', preparing: '正在整理职位要求', searching: '正在准备推荐人才', reading: '正在读取候选人简历', evaluating: '正在评估匹配度', greeting: '正在核对身份并打招呼' }
@@ -30,6 +30,50 @@ const NOTICE_DURATION_MS = 6000
 
 function SourcingLoadingDots() {
   return <span className="air-sourcing-loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+}
+
+function resumeProgress(person: Pick<SourcingResultCandidate, 'communication' | 'resumeReceived' | 'resumeAttachments'>) {
+  const steps = [
+    { label: '打招呼', done: communicationState(person.communication) === 'recorded', status: communicationLabels[communicationState(person.communication)] },
+    { label: '获取简历', done: !!person.resumeReceived || !!person.resumeAttachments?.length, status: '未获取简历' },
+    { label: '简历入库', done: !!person.resumeAttachments?.some(file => file.uploadedAt), status: '未入库' },
+  ]
+  return <ol className="air-resume-progress" aria-label="简历流程进度">{steps.map((step, index) => <li key={step.label} className={`air-resume-progress-step${step.done ? ' is-complete' : ''}${index > 0 && step.done && steps[index - 1].done ? ' is-connected' : ''}`} aria-label={step.done ? `${step.label}已完成` : step.status} title={step.done ? `${step.label}已完成` : step.status}>
+    <span className="air-resume-progress-node" aria-hidden="true">{step.done && <CheckIcon />}</span><span>{step.label}</span>
+  </li>)}</ol>
+}
+
+function historySummary(profile: CandidateListProfile | undefined, kind: 'work' | 'education') {
+  const rows = profile?.[kind] ?? [], Icon = kind === 'work' ? BackpackIcon : ReaderIcon
+  const label = kind === 'work' ? '工作经历' : '教育经历'
+  return <section className={`air-person-history is-${kind}`} aria-label={label}>
+    <Icon aria-hidden="true" />
+    {rows.length ? <ul>{rows.slice(0, 2).map((row, index) => <li key={`${row.organization}:${index}`}>
+      <span className="air-person-history-text"><span title={row.organization}>{row.organization}</span>{row.description && <span title={row.description}>{row.description}</span>}</span>
+      {row.period && <span className="air-person-history-period" title={row.period}>{row.period}</span>}
+    </li>)}</ul> : <span className="air-person-history-empty">未展示{label}</span>}
+  </section>
+}
+
+function candidateBasics(person: SourcingResultCandidate) {
+  const basic = ['工作经验', '学历'].flatMap(label => person.fields.filter(field => field.label === label))
+  const age = person.listProfile?.age?.replace(/\s+/g, '')
+  const expectation = [person.listProfile?.expectation?.city, person.listProfile?.expectation?.role].filter(Boolean).join(' · ')
+  return <div className="air-person-basics" aria-label="基础信息">
+    <p className="air-person-basic-line">{age && <span>{age}</span>}{basic.map(field => <span key={field.label}>{field.label === '工作经验' ? field.value.replace(/^工作(?:经验)?\s*/, '').replace(/\s+(?=年)/g, '') : field.value}</span>)}{!basic.length && !age && <span>基础信息未展示</span>}</p>
+    <p className="air-person-expectation" title={`期望：${expectation || '未展示'}`}><span className="air-person-expectation-label">期望：</span>{expectation || '未展示'}</p>
+    {!person.listProfile?.work.length && <p className="air-person-current-company" title={person.fields.find(field => field.label === '公司')?.value}>{person.fields.find(field => field.label === '公司')?.value}</p>}
+  </div>
+}
+
+function matchesCandidateSearch(person: SourcingResultCandidate, terms: string[]) {
+  if (!terms.length) return true
+  const profile = person.listProfile
+  const text = [person.name, ...person.fields.map(field => field.value), profile?.age,
+    profile?.expectation?.city, profile?.expectation?.role,
+    ...[...(profile?.work ?? []), ...(profile?.education ?? [])].flatMap(row => [row.organization, row.description]),
+  ].filter(Boolean).join('\n').normalize('NFKC').toLowerCase()
+  return terms.every(term => text.includes(term))
 }
 
 export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReason = '', onStart, onReconcile, onRequireExtension, selectedTaskId, selectedRecord, positionId, compact = false, positions, executionId }: {
@@ -71,6 +115,8 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   const [startingUpload, setStartingUpload] = useState(false)
   const [downloading, setDownloading] = useState('')
   const [jobDescription, setJobDescription] = useState<string>()
+  const [candidateQuery, setCandidateQuery] = useState('')
+  const candidateSearch = useRef<HTMLInputElement>(null)
   const communicationRequest = useRef<AbortController>()
   const downloadRequest = useRef<AbortController>()
   const uploadRequest = useRef<AbortController>()
@@ -169,12 +215,15 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   const displayedResults = resultRoundId && results?.jobId === jobId && results.roundId === resultRoundId ? results : undefined
   const displayedRun = executionId === undefined || displayedResults?.current?.id === executionId ? displayedResults?.current : undefined
   const rounds = executionId === undefined ? displayedResults?.rounds ?? (results?.jobId === jobId ? results.rounds : []) : displayedResults?.rounds.filter(round => round.id === executionId) ?? []
+  const { splitRoot, splitHandle } = useResizableSplit(!compact && view === 'results' && !!jobId && (!!displayedResults || rounds.length > 0))
   const allCandidates = (displayedResults?.candidates ?? []).filter(row => executionId === undefined || row.roundId === executionId)
+  const searchTerms = candidateQuery.normalize('NFKC').trim().toLowerCase().split(/\s+/).filter(Boolean)
   const candidates = allCandidates.filter(row =>
     (!row.scoring?.needsReview && row.score >= sourcingMinimumScore(row)) && (filter.score === 'all' || row.score >= Number(filter.score))
     && (filter.communication === 'all' || communicationState(row.communication) === filter.communication)
     && ((filter.received ?? 'all') === 'all' || (filter.received === 'received' ? !!row.resumeReceived : !row.resumeReceived))
-    && (filter.platform === 'all' || row.platform === filter.platform))
+    && (filter.platform === 'all' || row.platform === filter.platform)
+    && matchesCandidateSearch(row, searchTerms))
     .slice().sort((a, b) => {
       const newer = (Date.parse(b.collectedAt) || 0) - (Date.parse(a.collectedAt) || 0)
       return (sort === 'newest' ? newer : sort === 'score-asc' ? a.score - b.score : sort === 'coverage-desc' ? b.coverage - a.coverage : b.score - a.score) || newer || a.resultKey.localeCompare(b.resultKey)
@@ -204,6 +253,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
     setJobId(id); setPosition(undefined); setPlatforms([]); setResults(undefined); setRoundId('all'); setDetailData(undefined); setSupplement(''); setSelectedKey(''); setView('results'); setFilter(emptyFilters); setError(''); setMobileDetail(false)
     setLimit(20); setMinimumScore(DEFAULT_MINIMUM_SCORE)
     setJobDescription(undefined)
+    setCandidateQuery('')
   }
   function persistSettings(settings: Partial<SourcingSettings>) {
     const target = jobId
@@ -221,9 +271,9 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   useEffect(() => { detailPane.current?.scrollTo({ top: 0 }) }, [selected?.resultKey, detail])
   useEffect(() => {
     const pane = detailPane.current
-    if (mobileDetail && pane && (compact || (pane.closest('.air-workbench')?.clientWidth ?? Infinity) <= 640)) {
+    if (mobileDetail && pane && compact) {
       pane.focus({ preventScroll: true }); pane.scrollIntoView({ block: 'nearest' })
-    } else if (!mobileDetail && wasMobileDetail.current && (compact || (listPane.current?.closest('.air-workbench')?.clientWidth ?? Infinity) <= 640)) {
+    } else if (!mobileDetail && wasMobileDetail.current && compact) {
       listPane.current?.querySelector<HTMLButtonElement>('.air-sourcing-person.is-selected .air-sourcing-person-select')?.focus({ preventScroll: true })
     }
     wasMobileDetail.current = mobileDetail
@@ -283,11 +333,10 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
   function attachmentStatus(file: ReceivedResumeAttachment) {
     return file.uploadedAt ? '已入库' : file.uploadStopped ? activeUpload ? '正在上传…' : '上传已停止，请核对入库记录' : file.uploadError ? '上传失败，可重试' : '未入库'
   }
-  function resumeReceipt(person: SourcingResultCandidate) {
+  function resumeDownload(person: SourcingResultCandidate) {
     const file = person.resumeAttachments?.[0]
-    if (file) return <button type="button" className="air-person-contact air-contact-tag is-received" title={`下载 ${file.fileName}（${attachmentStatus(file)}）`} aria-label={`下载${person.name}的附件简历：${file.fileName}`} aria-busy={downloading === file.id} disabled={!!downloading} onClick={() => void downloadResume(person, file)}><FileTextIcon aria-hidden="true" />{downloading === file.id ? '下载中…' : '收到简历'}</button>
-    return person.resumeReceived ? <span className="air-person-contact air-contact-tag is-received" title="已收到简历，附件尚未取得；请同步平台简历后下载"><FileTextIcon aria-hidden="true" />收到简历</span>
-      : <span className="air-person-contact" title="尚无匹配的已收简历记录">未收到简历</span>
+    if (!file) return null
+    return <button type="button" className="air-attachment-trigger air-person-download" title={`下载 ${file.fileName}（${attachmentStatus(file)}）`} aria-label={`下载${person.name}的附件简历：${file.fileName}`} aria-busy={downloading === file.id} disabled={!!downloading} onClick={() => void downloadResume(person, file)}><DownloadIcon aria-hidden="true" />{downloading === file.id ? '下载中…' : '下载'}</button>
   }
   function attachmentDownload(person: SourcingResultCandidate) {
     const files = person.resumeAttachments ?? []
@@ -340,9 +389,9 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
     if (!valid) { changeView('requirements'); return }
     setError(''); onStart({ jobId, platforms: selectedPlatforms, supplement, ...(jobDescription === undefined ? {} : { jobDescription }), limit, minimumScore, autoGreet: true, confirmed: true }); setView('results')
   }
-  const hasFilters = executionId === undefined && roundId !== 'all' || Object.values(filter).some(value => value !== 'all')
+  const hasFilters = searchTerms.length > 0 || executionId === undefined && roundId !== 'all' || Object.values(filter).some(value => value !== 'all')
   const activeFilterCount = Object.values(filter).filter(value => value && value !== 'all').length
-  function resetFilters() { setFilter(emptyFilters); changeRound('all') }
+  function resetFilters() { setFilter(emptyFilters); setCandidateQuery(''); changeRound('all') }
   function updateFilter(key: keyof CandidateFilters, value: string) { setFilter(previous => ({ ...previous, [key]: value })); setMobileDetail(false) }
   const candidateIndex = selected ? candidates.findIndex(row => row.resultKey === selected.resultKey) : -1
   const displayPosition = effectivePosition ?? displayedRun?.position
@@ -406,7 +455,7 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
                 : <button type="button" className="air-button air-button-outline" disabled={locked || syncingCommunication || startingUpload || !pendingAttachmentIds.length} onClick={() => void uploadReceived()} title={`上传当前筛选列表中 ${pendingAttachmentIds.length} 份未入库附件到 ${jobName} · 新简历 · 未处理`}><UploadIcon aria-hidden="true" />{startingUpload ? '正在启动入库…' : `简历入库（${pendingAttachmentIds.length}）`}</button>}
             </div>
           </div>
-          <div className="air-sourcing-filterbar" aria-label="筛选与排序候选人">
+          <div className="air-sourcing-filterbar" aria-label="搜索、筛选与排序候选人">
           <div className="air-sourcing-filter-controls">
             {executionId === undefined && <SelectMenu id="air-filter-round" label="寻聘轮次" value={roundId} onChange={changeRound} options={[{value:'all',label:'寻聘轮次：全部'}, ...rounds.map(round => ({value:round.id,label:roundStamp(round.createdAt)}))]} />}
             <details className={`air-talent-filters${activeFilterCount ? ' is-filtered' : ''}`} ref={filterMenu} onToggle={event => { if (event.currentTarget.open && feedbackMenu.current) feedbackMenu.current.open = false }} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) event.currentTarget.open = false }}>
@@ -428,27 +477,32 @@ export function SourcingPanel({ rpc, state, locked, pending, busy, blockingReaso
             </details>
             {hasFilters && <button type="button" className="air-text-button" onClick={resetFilters}>重置</button>}
           </div>
-          <SelectMenu id="air-candidate-sort" className="air-talent-sort" label="候选人排序" value={sort} onChange={setSort} align="right" options={[{value:'score-desc',label:'匹配度从高到低'},{value:'score-asc',label:'匹配度从低到高'},{value:'newest',label:'最近发现优先'},{value:'coverage-desc',label:'信息完整度优先'}]} />
+          <div className="air-talent-search-sort">
+            <div className="air-talent-search"><MagnifyingGlassIcon aria-hidden="true" /><input ref={candidateSearch} type="search" aria-label="搜索人才" placeholder="搜索姓名、公司、岗位" value={candidateQuery} onChange={event => { setCandidateQuery(event.target.value); setMobileDetail(false) }} onKeyDown={event => { if (event.key === 'Escape') { setCandidateQuery(''); event.stopPropagation() } }} />{candidateQuery && <button type="button" aria-label="清空搜索" title="清空搜索" onClick={() => { setCandidateQuery(''); candidateSearch.current?.focus() }}><Cross2Icon aria-hidden="true" /></button>}</div>
+            <SelectMenu id="air-candidate-sort" className="air-talent-sort" label="候选人排序" value={sort} onChange={setSort} align="right" options={[{value:'score-desc',label:'匹配度从高到低'},{value:'score-asc',label:'匹配度从低到高'},{value:'newest',label:'最近发现优先'},{value:'coverage-desc',label:'信息完整度优先'}]} />
+          </div>
           </div>
         </div>
-        <div className={`air-sourcing-results ${mobileDetail ? 'is-detail-open' : ''}`}>
+        <div className={`air-sourcing-results ${mobileDetail ? 'is-detail-open' : ''}`} ref={splitRoot}>
           <div className="air-sourcing-list" ref={listPane} aria-label="候选名单">
             <ul>{candidates.map(person => <li className={`air-sourcing-person-row${selected?.resultKey === person.resultKey ? ' is-selected' : ''}`} key={person.resultKey}>
               <div className={`air-sourcing-person ${selected?.resultKey === person.resultKey ? 'is-selected' : ''}`}>
-                <span className="air-sourcing-person-heading"><span className="air-sourcing-person-identity"><button type="button" className="air-sourcing-person-select" aria-pressed={selected?.resultKey === person.resultKey} aria-label={`查看${person.name}的候选人详情，匹配度 ${person.score} 分`} onClick={() => selectCandidate(person.resultKey)}><b>{person.name}</b></button>{renderPlatformTag(person.platform)}<span className={`air-person-contact${communicationState(person.communication) === 'recorded' ? ' air-contact-tag is-greeted' : ''}`}>{communicationState(person.communication) === 'recorded' && <ChatBubbleIcon aria-hidden="true" />}{communicationLabels[communicationState(person.communication)]}</span>{resumeReceipt(person)}</span><strong>{person.score}<small> / 100</small></strong></span>
-                <span className="air-sourcing-person-role" title={person.fields.filter(field => primaryField(field.label)).map(field => field.value).join(' / ')}>{person.fields.filter(field => primaryField(field.label)).map(field => <span key={field.label}>{field.value}</span>)}</span><span className="air-sourcing-person-facts">{person.fields.filter(field => !primaryField(field.label)).map(field => <span key={field.label}>{field.value}</span>)}{!person.fields.some(field => !primaryField(field.label)) && '其他基本信息未披露'}</span>
-
+                <div className="air-sourcing-person-heading"><span className="air-sourcing-person-identity"><button type="button" className="air-sourcing-person-select" aria-pressed={selected?.resultKey === person.resultKey} aria-label={`查看${person.name}的候选人详情，匹配度 ${person.score} 分`} onClick={() => selectCandidate(person.resultKey)}><b>{person.name}</b></button>{renderPlatformTag(person.platform)}</span>{resumeProgress(person)}<strong>{person.score}<small> / 100</small></strong></div>
+                <div className="air-person-overview">{candidateBasics(person)}<div className="air-person-histories">{historySummary(person.listProfile, 'work')}{historySummary(person.listProfile, 'education')}</div></div>
+                {!!person.resumeAttachments?.length && <div className="air-person-download-row">{resumeDownload(person)}</div>}
               </div>
             </li>)}</ul>
-            {!candidates.length && <div className="air-sourcing-empty-result"><h3>{loading && !displayedResults ? '正在读取轮次结果…' : hasFilters ? '暂无符合筛选的人选' : batchRunning ? '正在寻找合适的人选' : roundId === 'all' ? '该职位尚无候选人' : '本轮尚无候选人'}</h3><p>{loading && !displayedResults ? '结果正在读取，请稍候。' : hasFilters ? '试试其他筛选，或查看全部候选人。' : batchRunning ? '结果会陆续出现在这里，可以先查看寻聘设置。' : displayedRun ? '展开执行详情，查看渠道状态和停止原因。' : '按职位要求开始寻聘后，候选人将显示在这里。'}</p>{hasFilters && <button type="button" className="air-text-button" onClick={resetFilters}>查看全部</button>}</div>}
+            {!candidates.length && <div className="air-sourcing-empty-result"><h3>{loading && !displayedResults ? '正在读取轮次结果…' : searchTerms.length ? '暂无符合搜索条件的人选' : hasFilters ? '暂无符合筛选的人选' : batchRunning ? '正在寻找合适的人选' : roundId === 'all' ? '该职位尚无候选人' : '本轮尚无候选人'}</h3><p>{loading && !displayedResults ? '结果正在读取，请稍候。' : hasFilters ? '试试其他关键词或筛选条件，或查看全部候选人。' : batchRunning ? '结果会陆续出现在这里，可以先查看寻聘设置。' : displayedRun ? '展开执行详情，查看渠道状态和停止原因。' : '按职位要求开始寻聘后，候选人将显示在这里。'}</p>{hasFilters && <button type="button" className="air-text-button" onClick={resetFilters}>查看全部</button>}</div>}
           </div>
+          {!compact && <div className="air-sourcing-splitter" ref={splitHandle} role="separator" aria-orientation="vertical" aria-label="调整候选列表与简历详情的宽度" tabIndex={0} title="左右拖动调整宽度，也可使用方向键" />}
           {candidate ? <article className="air-sourcing-detail" tabIndex={-1} ref={detailPane} key={selected?.resultKey} aria-label={`${candidate.name}的候选人详情`}>
             <header className="air-sourcing-detail-header">
               <button type="button" className="air-text-button air-sourcing-back" onClick={() => setMobileDetail(false)}><ArrowLeftIcon aria-hidden="true" />候选名单</button>
               <div className="air-sourcing-detail-title"><h3>{candidate.name}{renderPlatformTag(candidate.platform)}</h3>
                 <div className="air-candidate-score"><strong>{candidate.score}<small>/100</small></strong><span>{candidate.scoring?.needsReview ? '未达标' : '匹配度'}</span></div>
               </div>
-              <p className="air-sourcing-caption">{selected && <time dateTime={selected.roundCreatedAt}>{stamp(selected.roundCreatedAt)} 获取</time>}<span>{candidate.scope === 'summary' ? '平台列表信息' : '在线简历'}</span><span>{communicationLabels[communicationState(candidate.communication)]}</span><span>{candidate.resumeReceived ? '已收到简历' : '未收到简历'}</span></p>
+              <p className="air-sourcing-caption">{selected && <time dateTime={selected.roundCreatedAt}>{stamp(selected.roundCreatedAt)} 获取</time>}<span>{candidate.scope === 'summary' ? '平台列表信息' : '在线简历'}</span></p>
+              {resumeProgress(candidate)}
             </header>
             <div className="air-sourcing-detail-body">
               <dl className="air-sourcing-facts">{candidate.fields.map((field, index) => <div key={index}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}</dl>

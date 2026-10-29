@@ -1,6 +1,6 @@
 {
   "name": "dsh-ai-recruiter",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "AI recruitment assistant with bundled Xinzhao browser gateway and browser-control skill.",
   "type": "module",
   "main": "dist/index.js",

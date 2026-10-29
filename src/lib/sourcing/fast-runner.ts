@@ -24,6 +24,7 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
   let modelMs = 0, turns = 0
   let failedState: string | undefined
   let lastHandoff: string | undefined
+  let obstructionFrame: number | undefined
   let unreadableResumes = 0
   const seen = new Set<string>()
   const driver = platform.createSourcingDriver?.({ ...context, signal, progress: operations.progress })
@@ -67,23 +68,43 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }, readOnly: false,
     failureKey: () => 'platform-collection',
     contextSnapshot: (args, value) => context.broker.contextSnapshot(args, value),
-    recover: async (_error, _args, toolSignal) => {
+    recover: async (error, _args, toolSignal) => {
       const page = context.broker.currentPage()
       const hostState = operations.state()
+      const obstruction = /ELEMENT_OCCLUDED|PAGE_DIALOG_BLOCKED|(?:unexpected.*dialog|list_has_dialog|scroll_anchor_missing)/.test(String(error))
+      let obstructionContext: Record<string, unknown> | undefined
       let observation: unknown
       if (page?.tabId) {
         const snapshot = context.broker.tools.find(tool => tool.name === 'browser_snapshot')!
         const supportsFormat = !!(snapshot.inputSchema?.properties as any)?.format
         try {
           observation = await snapshot.execute({ tabId: page.tabId,
-            ...(supportsFormat && (hostState.pending || hostState.needsGreeting) ? { format: 'dom' } : {}) }, toolSignal)
+            ...(supportsFormat && (obstruction || hostState.pending || hostState.needsGreeting) ? { format: 'dom' } : {}) }, toolSignal)
+          if (obstruction) {
+            const current = context.broker.currentPage()
+            obstructionContext = { blockedFrameId: page.frameId ?? 0, activeFrameId: current?.frameId ?? 0,
+              next: '先识别并处理遮挡，再继续人选。检查前景弹窗和关闭控件；无文字的关闭图标先browser_inspect_element核对其关闭语义及弹窗归属，再点击。不要点击被遮挡的姓名或招呼按钮，也不要用确认/购买/发送代替关闭。关闭后读取新快照确认弹窗消失，再恢复原列表帧和当前候选人。' }
+            // An outer-page overlay can cover an otherwise readable iframe.
+            // Keep only the latest observation actionable for this tab.
+            const closeInFrame = current?.items?.some((item: any) =>
+              (/^(?:关闭|close|×)$/i.test(String(item.name ?? '').trim())
+                || current?.dialogs?.some((dialog: any) => dialog.closeRef === item.ref))
+              && !/(?:hidden|invisible|occluded|blocked_by_dialog)/.test(JSON.stringify(item.states ?? [])))
+            if (page.frameId && !closeInFrame && (snapshot.inputSchema?.properties as any)?.frameId) {
+              observation = await snapshot.execute({ tabId: page.tabId, frameId: 0, ...(supportsFormat ? { format: 'dom' } : {}) }, toolSignal)
+              obstructionContext.activeFrameId = 0
+              obstructionContext.returnFrameId = page.frameId
+              obstructionFrame = page.frameId
+            }
+          }
         } catch (error) {
           toolSignal.throwIfAborted()
           observation = { error: browserFailureCode(error) ?? 'OBSERVATION_UNAVAILABLE' }
         }
       }
+      if (obstruction) failedState = stateKey()
       const captured = operations.captured()
-      return { hostState, requirements: context.job.requirements, observation, processedCandidateKeys: [...seen].slice(-80),
+      return { hostState, requirements: context.job.requirements, observation, ...(obstructionContext ? { obstruction: obstructionContext } : {}), processedCandidateKeys: [...seen].slice(-80),
         capturedResume: captured && { name: captured.name, characters: captured.text.length, scope: captured.scope },
         next: hostState.pending
           ? '候选人已完成列表初筛并处于待处理状态。hostState.selectedCandidate 是当前人选的稳定身份和列表依据；按当前平台的简历入口（链接或明确的查看控件）打开同一人的详情，再读取、评估和保存。姓名文本本身不一定是入口，找不到可验证的入口时不要反复点击同一节点，按平台提示停止并说明。不要再次选择或替换候选人；确实无法定位时调用sourcing_skip_candidate后继续。'
@@ -276,11 +297,15 @@ export async function runSourcingWorkflow(platform: RecruitmentPlatform, context
     const tools = operations.recoveryTools(scopedAgent)
     if (driver) tools.unshift(collection)
     const result = await agent({ ...fallback, tools, signal,
-      system: fallback.system + '\n平台固定流程已在模型之前直接执行。你只处理当前异常或未识别页面；宿主会在你改变页面后自动尝试接回固定流程，不必逐个选择已知列表的人选、反复读取或调用sourcing_collect。保留当前人选与结果；不要重新启动任务。',
+      system: fallback.system + '\n平台固定流程已在模型之前直接执行。你只处理当前异常或未识别页面；宿主会在你改变页面后自动尝试接回固定流程，不必逐个选择已知列表的人选、反复读取或调用sourcing_collect。保留当前人选与结果；不要重新启动任务。若recovery.obstruction存在，优先完成其中的遮挡恢复：识别弹窗、inspect核实关闭入口、关闭一次、读取新快照确认、返回returnFrameId。不要反复点击被遮挡目标，也不要在遮挡未消除时反复调用sourcing_collect。',
       goal: { ...fallback.goal, requirements: context.job.requirements, hostState: operations.state() },
       initialToolResults: recoverySeeds.length ? [...(fallback.initialToolResults ?? []).filter(seed => seed.name === 'browser_list_tabs'), ...recoverySeeds] : fallback.initialToolResults,
       beforeTurn: driver ? async toolSignal => {
         const seeds = await fallback.beforeTurn?.(toolSignal) ?? []
+        if (obstructionFrame !== undefined) {
+          if (context.broker.currentPage()?.frameId !== obstructionFrame) return seeds
+          obstructionFrame = undefined
+        }
         if (operations.complete() || failedState === stateKey()) return seeds
         try {
           const value = await collection.execute({}, toolSignal)

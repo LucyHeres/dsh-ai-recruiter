@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { hash } from './store.js'
-import { identityObservation, itemText, normalized, readableIdentityRef } from './page-actions.js'
+import { identityObservation, itemText, normalized, readableIdentityRef, statesOf } from './page-actions.js'
 import type { AgentBrowserCall } from './agent-browser-tools.js'
 import type { SourcingAssessment, SourcingCandidate, SourcingCriterion, SourcingPosition, SourcingRequirements } from '../shared/sourcing.js'
 import { PLATFORM_KEYS } from '../shared/workbench.js'
@@ -74,6 +74,22 @@ export function assessCandidate(criteria: SourcingCriterion[], assessments: Sour
 
 const blockedControl = /沟通|打招呼|开聊|发送|联系|索要|交换|购买|付费|支付|解锁|下载|导出|收藏|不合适|邀约|邀请|删除|保存|提交简历|举报|投递|申请|屏蔽|短信|拨打|\b(?:send|greet|chat|purchase|pay|unlock|download|export|favorite|delete|submit|apply|report)\b/i
 const searchField = /搜索|搜人才|关键词|关键字|职位|城市|地区|地点|经验|学历|薪资|行业|职能|search|keyword/i
+/** Inspection can establish the meaning of an otherwise unnamed close icon.
+ * A bare cross/class without foreground ownership is not sufficient. */
+export function inspectedSourcingClose(page: any, ref: string, inspection: any) {
+  const item = page?.items?.find((row: any) => row.ref === ref), element = inspection?.element
+  if (!item || !element || element.visible === false || element.ref && element.ref !== ref) return false
+  if (blockedControl.test(normalized(item.name))) return false
+  if (statesOf(item).some(state => ['hidden', 'invisible', 'blocked_by_dialog', 'disabled'].includes(state))) return false
+  const closeLabel = /^(?:关闭(?:此|当前)?(?:弹窗|窗口|对话框|提示|浮层|广告)?|close(?: (?:dialog|modal|popup|window))?|×)$/i
+  const attributes = element.attributes ?? {}
+  if ([attributes['aria-label'], attributes.title].some(label => closeLabel.test(normalized(label)))) return true
+  const isClose = String(attributes.class ?? '').split(/\s+/).some(token => /^(?:(?:[\w-]+[-_])?close(?:[-_](?:btn|button|icon))?)$/i.test(token))
+  const foreground = page.dialogs?.some((dialog: any) => dialog.closeRef === ref || dialog.ref === item.dialogRef)
+    || inspection.ancestors?.some((node: any) => ['dialog', 'alertdialog'].includes(node.role ?? node.attributes?.role)
+      || /(?:^|[\s_-])(?:modal|dialog|popup|popover|drawer)(?:$|[\s_-])/i.test(String(node.attributes?.class ?? '')))
+  return !!(isClose && foreground)
+}
 /** The model chooses navigation from observed semantics. Code rejects business
  * writes and unsafe input; website-specific positive button lists do not gate clicks. */
 export function assertSourcingNavigation(call: AgentBrowserCall, page: any, selectedName?: string, focusedSearch = false, positionControl = false, platformReadOnlyControl = false) {

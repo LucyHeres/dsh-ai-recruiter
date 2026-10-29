@@ -37,6 +37,15 @@ export interface SourcingAssessment {
   evidenceQuotes?: string[]; verificationQuestion?: string
 }
 export interface SourcingScoring { version: 2; baseScore: number; bonusScore: number; assessedWeight: number; needsReview: boolean }
+export interface CandidateHistorySummary {
+  organization: string; description?: string; period?: string
+}
+export interface CandidateListProfile {
+  age?: string
+  expectation?: { city?: string; role?: string }
+  work: CandidateHistorySummary[]
+  education: CandidateHistorySummary[]
+}
 export interface SourcingCandidate {
   key: string; name: string; platform: Platform; profileUrl: string; sourceUrl: string; collectedAt: string
   /** Verified previous text-key formats, excluding mutable UI contact state. */
@@ -47,6 +56,8 @@ export interface SourcingCandidate {
   /** First observed platform receipt time; not the candidate's send time. */
   resumeReceivedAt?: string
   resumeAttachments?: ReceivedResumeAttachment[]
+  /** Bounded display excerpts from this person's observed list card/resume. */
+  listProfile?: CandidateListProfile
   scope: 'summary' | 'online'; fields: { label: string; value: string }[]; resumeText: string
   resumeEvidence?: { kind: 'visual'; imageHashes: string[]; pages: number }
   resumeTruncated?: boolean
@@ -74,7 +85,7 @@ export interface SourcingRound {
 }
 export type SourcingRun = Pick<SourcingJob, 'id' | 'jobId' | 'status' | 'phase' | 'createdAt' | 'updatedAt' | 'limit' | 'limitScope' | 'platforms' | 'sourceMode' | 'searchFilters' | 'detail' | 'channels' | 'position' | 'requirements' | 'supplement' | 'minimumScore' | 'autoGreet' | 'greetings' | 'scanned' | 'skippedLowScore' | 'skippedByFilters' | 'skippedUnverified' | 'events'> & { candidateCount: number }
 /** Lists carry identity/score metadata only; a selected evaluation loads its own evidence. */
-export type SourcingResultCandidate = Pick<SourcingCandidate, 'key' | 'name' | 'platform' | 'fields' | 'score' | 'coverage' | 'collectedAt' | 'communication' | 'resumeReceived' | 'resumeReceivedAt' | 'resumeAttachments' | 'scoring'> & {
+export type SourcingResultCandidate = Pick<SourcingCandidate, 'key' | 'name' | 'platform' | 'fields' | 'score' | 'coverage' | 'collectedAt' | 'communication' | 'resumeReceived' | 'resumeReceivedAt' | 'resumeAttachments' | 'scoring' | 'listProfile'> & {
   minimumScore?: number; resultKey: string; roundId: string; roundNumber: number; roundCreatedAt: string
 }
 export interface SourcingResults {

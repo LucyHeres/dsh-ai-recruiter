@@ -53,13 +53,22 @@ export function useExtensionSetup(installation: ExtensionInstallation | undefine
 }
 
 export function ExtensionInstallGuide({ missing, outdated, unconfirmed, version, checking, notice, onCheck, onClose }: { missing: boolean; outdated?: boolean; unconfirmed?: boolean; version?: string; checking: boolean; notice: string; onCheck: () => void; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null)
+  const overlay = useRef<HTMLDivElement>(null)
+  const dialog = useRef<HTMLElement>(null)
   useEffect(() => {
     const node = dialog.current, opener = document.activeElement as HTMLElement | null
-    node?.showModal()
-    return () => { node?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) }
+    // Block only this plugin's content; the host navigation must remain usable.
+    const background = overlay.current?.previousElementSibling as HTMLElement | null
+    const wasInert = background?.inert ?? false
+    if (background) background.inert = true
+    node?.focus({ preventScroll: true })
+    return () => {
+      if (background) background.inert = wasInert
+      if (opener?.isConnected && (node?.contains(document.activeElement) || document.activeElement === document.body)) opener.focus({ preventScroll: true })
+    }
   }, [])
-  return <dialog ref={dialog} className="air-extension-guide" aria-labelledby="air-extension-guide-title" aria-describedby="air-extension-guide-description" onCancel={event => { event.preventDefault(); onClose() }}>
+  return <div ref={overlay} className="air-workbench air-extension-overlay" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() } }}>
+    <section ref={dialog} role="dialog" tabIndex={-1} className="air-extension-guide" aria-labelledby="air-extension-guide-title" aria-describedby="air-extension-guide-description">
     <header><span className="air-extension-guide-icon"><DesktopIcon aria-hidden="true" /></span><button type="button" className="air-icon-button" aria-label="关闭安装引导" onClick={onClose}><Cross2Icon aria-hidden="true" /></button></header>
     <h2 id="air-extension-guide-title">{outdated ? EXTENSION_UPGRADE_MESSAGE : unconfirmed ? EXTENSION_UNCONFIRMED_MESSAGE : missing ? EXTENSION_MISSING_MESSAGE : '安装【薪招】浏览器扩展'}</h2>
     <p id="air-extension-guide-description">{EXTENSION_DESCRIPTION}{version ? `当前版本为 ${version}。` : ''}需要 {MINIMUM_EXTENSION_VERSION} 或更高版本。</p>
@@ -68,5 +77,6 @@ export function ExtensionInstallGuide({ missing, outdated, unconfirmed, version,
       <a className="air-button air-button-primary" href={EXTENSION_INSTALL_URL} target="_blank" rel="noreferrer">{outdated ? '去升级薪招' : '去安装薪招'}<ArrowTopRightIcon aria-hidden="true" /></a>
       <button type="button" className="air-button air-button-outline" disabled={checking} onClick={onCheck}><ReloadIcon aria-hidden="true" />{checking ? '正在检测…' : outdated ? '已升级，重新检测' : '已安装，重新检测'}</button>
     </div>
-  </dialog>
+    </section>
+  </div>
 }

@@ -256,9 +256,20 @@ export class BossSourcingDriver implements SourcingDriver {
     const next = page.items.filter((item: any) => visible(item, page) && normalized(item.name) === '下一页' && !statesOf(item).includes('disabled'))
     if (next.length === 1) await this.browser.click(next[0].ref)
     else {
-      const anchor = cards[0]
+      // The greeting controls can sit outside the card body and remain
+      // occluded while the list is readable. Prefer a current card entry near
+      // the viewport center, clear of the sticky header and clipped edges.
+      const height = Number(page.viewport?.height ?? 700), width = Number(page.viewport?.width ?? Infinity)
+      const pick = (refs: string[]) => page.items.filter((item: any) => refs.includes(item.ref)
+        && !statesOf(item).some(state => ['hidden', 'invisible', 'occluded', 'blocked_by_dialog', 'disabled'].includes(state))
+        && item.bounds?.width > 0 && item.bounds?.height > 0
+        && item.bounds.x + item.bounds.width / 2 > 0 && item.bounds.x + item.bounds.width / 2 < width
+        && item.bounds.y + item.bounds.height / 2 > 0 && item.bounds.y + item.bounds.height / 2 < height)
+        .sort((a: any, b: any) => Math.abs(a.bounds.y + a.bounds.height / 2 - height / 2)
+          - Math.abs(b.bounds.y + b.bounds.height / 2 - height / 2))[0]
+      const anchor = pick(cards.map(card => card.openRef)) ?? pick(cards.flatMap(card => [card.ref, ...card.evidenceRefs]))
       if (!anchor) throw new SourcingHandoff('boss_scroll_anchor_missing')
-      await this.browser.execute('browser_scroll', { ...this.browser.locator(anchor.ref), deltaY: Math.max(120, Math.floor(Number(page.viewport?.height ?? 700) * 0.65)), purpose: 'navigation' })
+      await this.browser.execute('browser_scroll', { ...this.browser.locator(anchor.ref), deltaY: Math.max(120, Math.floor(height * 0.65)), purpose: 'navigation' })
     }
     return {}
   }

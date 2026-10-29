@@ -4,6 +4,7 @@ import { hash } from './store.js'
 import { taskResultRows } from '../shared/greeting-results.js'
 import { platformIdentityKey } from './candidate-identity.js'
 import { hasGreeted } from '../shared/communication.js'
+import { candidateListProfile } from './candidate-list-profile.js'
 import { candidateResumeReceipt, type CandidateContact } from './candidate-contact.js'
 import { candidateAttachments, type ReceivedResumeRecord } from './received-resume-store.js'
 import type { WorkbenchJob, TaskKind } from '../shared/workbench.js'
@@ -33,6 +34,11 @@ export function candidateCommunication(candidate: SourcingCandidate, index: Retu
   if (!candidate.profileUrl) return 'none'
   return index.get(hash([candidate.platform, candidate.profileUrl])) ?? 'none'
 }
+function displayListProfile(candidate: SourcingCandidate) {
+  const parsed = candidateListProfile(candidate.resumeText, '', candidate.platform), saved = candidate.listProfile
+  return { ...parsed, ...saved, ...(saved?.expectation || parsed.expectation ? { expectation: saved?.expectation ?? parsed.expectation } : {}),
+    work: saved?.work.length ? saved.work : parsed.work, education: saved?.education.length ? saved.education : parsed.education }
+}
 export function taskHistoryPage(jobs: WorkbenchJob[], page: number, kind?: TaskKind): TaskHistoryPage {
   const ordered = jobs.filter(job => !job.historyCleared && (!kind || job.kind === kind)).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
   const pageSize = 20, lastPage = Math.max(1, Math.ceil(ordered.length / pageSize)), current = Math.min(page, lastPage)
@@ -57,7 +63,9 @@ export function sourcingResults(jobs: SourcingJob[], jobId: string, roundId: str
     seen.add(candidate.key); return true
   }).map(candidate => ({
     minimumScore: sourcingMinimumScore(job), key: candidate.key, resultKey: `${job.id}:${candidate.key}`, roundId: job.id, roundNumber: roundNumbers.get(job.id)!, roundCreatedAt: job.createdAt,
-    name: candidate.name, platform: candidate.platform, fields: candidate.fields, score: candidate.score, coverage: candidate.coverage, ...(candidate.scoring ? { scoring: candidate.scoring } : {}),
+    name: candidate.name, platform: candidate.platform, fields: candidate.fields,
+    listProfile: displayListProfile(candidate),
+    score: candidate.score, coverage: candidate.coverage, ...(candidate.scoring ? { scoring: candidate.scoring } : {}),
     collectedAt: candidate.collectedAt, communication: candidateCommunication(candidate, communications), ...candidateResumeReceipt(candidate, contacts), resumeAttachments: candidateAttachments(candidate, jobId, attachments),
   })))
   return { jobId, roundId, rounds, current: run ? {

@@ -7,6 +7,7 @@ import { createSourcingSession } from '../dist/lib/sourcing/session.js'
 import { Store, hash } from '../dist/lib/store.js'
 import { normalized } from '../dist/lib/page-actions.js'
 import { PNG } from 'pngjs'
+import { BossSourcingDriver } from '../dist/lib/platforms/boss/sourcing-driver.js'
 
 const entry = 'https://www.zhipin.com/web/chat/recommend'
 const frameEntry = 'https://www.zhipin.com/web/frame/recommend/?jobid=job123'
@@ -29,6 +30,7 @@ async function fixture(options = {}) {
   const store = new Store(dir, 'test'); await store.init()
   let revision = 0, detail = false, returned = false, selected = options.selected !== false
   let stale = !!options.staleCanvas, canvasFailure = false
+  let popup = !!options.recoverObstruction
   let frameMode = false, frameNavigations = 0
   let frameReads = 0, frameJobId = options.frameJobId ?? 'job123', positionMenu = !!options.menuInitiallyOpen
   let visualMode = false, canvasY = 0, transcriptions = 0, contactMade = false
@@ -51,7 +53,8 @@ async function fixture(options = {}) {
       ...(truncated ? {} : { href: 'https://www.zhipin.com/web/geek/resume?geekId=observed123' }),
       ...(truncated ? {} : { context: { text } }), bounds: { x: 120, y: 170, width: 70, height: 30 } }]),
     { ref: 'greet', role: 'button', name: '立即沟通', ...(truncated ? {} : { parentRef: 'card' }),
-      context: { text: truncated ? `${text} 立即沟通` : text }, bounds: { x: 500, y: 200, width: 100, height: 30 } },
+      context: { text: truncated ? `${text} 立即沟通` : text }, bounds: { x: 500, y: 200, width: 100, height: 30 },
+      ...(options.occludedScrollButton ? { states: ['enabled', 'occluded'] } : {}) },
   ]
   const listItems = () => !options.changingGreetingState ? cardItems : cardItems.map(item => item.ref === 'greet'
     ? { ...item, name: contactMade ? '继续沟通' : '打招呼', context: { text: `${text} ${contactMade ? '继续沟通' : '打招呼'}` } } : item)
@@ -74,7 +77,7 @@ async function fixture(options = {}) {
     ...(frameMode && options.outerUrl ? { frameUrl: `https://www.zhipin.com/web/frame/recommend/?jobid=${frameJobId}` } : {}),
     frameId: frameMode ? 1 : 0, ...(frameMode ? { tabUrl: entry, frameInteraction: options.legacyFrame ? undefined : 'same-origin' } : {}),
     viewport: { width: 1440, height: 800, scrollY: 0 }, selectedTabs: shell || document ? [] : selected ? [{ name: 'Java工程师', elementId: options.dynamicId === undefined ? 'job-job123' : options.dynamicId }] : [],
-    dialogs: !shell && detail && !options.canvas ? [{ ref: 'resume', text: full, closeRef: 'close' }] : !shell && options.unexpected ? [{ ref: 'unexpected', text: '新的业务提示，请理解后处理' }] : [],
+    dialogs: !shell && detail && !options.canvas ? [{ ref: 'resume', text: full, closeRef: 'close' }] : popup ? [{ ref: 'obstruction', text: '提示', closeRef: 'popup-close' }] : !shell && options.unexpected ? [{ ref: 'unexpected', text: '新的业务提示，请理解后处理' }] : [],
     items: shell ? shellItems : detail && options.canvas ? [...listItems(), { ref: 'visual-close', role: 'div', tagName: 'div', name: '', bounds: { x: 1400, y: 6, width: 24, height: 24 } }]
       : detail ? [{ ref: 'resume', role: 'dialog', name: full, dialogRef: 'resume' },
       { ref: 'close', role: 'button', name: '关闭', dialogRef: 'resume' }]
@@ -94,6 +97,8 @@ async function fixture(options = {}) {
         ...listItems()],
     ...(stale && !shell ? { items: [...(document ? documentItems() : listItems()),
       { ref: 'stale-close', role: 'div', tagName: 'div', name: '', bounds: { x: 1400, y: 6, width: 24, height: 24 } }] } : {}),
+    ...(popup ? { items: [{ ref: 'obstruction', role: 'dialog', name: '提示' },
+      { ref: 'popup-close', role: 'div', tagName: 'div', name: '', dialogRef: 'obstruction', bounds: { x: 900, y: 120, width: 24, height: 24 } }] } : {}),
   } }
   const call = async (name, args) => {
     if (name === 'browser_list_tabs') return { tabs: [{ tabId: 1, url: entry }] }
@@ -139,17 +144,22 @@ async function fixture(options = {}) {
     }
     assert.equal(args.snapshotId, page().snapshotId)
     if (name === 'browser_inspect_element') return { item: page().items.find(item => item.ref === args.ref),
-      element: { ref: args.ref, visible: true, attributes: { class: args.ref === 'card' ? 'card-inner' : args.ref === 'visual-close' || args.ref === 'stale-close' && !options.unverifiedStaleClose ? 'close-btn' : '' } },
+      element: { ref: args.ref, visible: true, attributes: { class: args.ref === 'card' ? 'card-inner' : args.ref === 'popup-close' ? 'modal-close' : args.ref === 'visual-close' || args.ref === 'stale-close' && !options.unverifiedStaleClose ? 'close-btn' : '' } },
       ancestors: args.ref === 'name' ? [{ ref: 'card', tagName: 'div', attributes: { class: 'card-inner' } }]
         : args.ref === 'card' ? [{ tagName: 'div', attributes: { class: 'candidate-card-wrap' } }]
         : ['visual-close', 'stale-close'].includes(args.ref) ? [{ tagName: 'div', attributes: { class: 'lib-standard-resume' } }] : [] }
     inputs.push({ name, ref: args.ref })
     if (name === 'browser_scroll') {
+      if (options.occludedScrollButton && args.ref === 'greet') throw new Error('ELEMENT_OCCLUDED')
       if (visualMode) canvasY = Math.max(0, Math.min(800, canvasY + args.deltaY))
       else scrolls++
       revision++; return { dispatched: true, snapshot: page() }
     }
     assert.equal(name, 'browser_click')
+    if (args.ref === 'popup-close') {
+      if (options.unknownPopupClose) throw Error('TOOL_CALL_OUTCOME_UNKNOWN')
+      popup = false
+    }
     if (args.ref === 'job-title' || args.ref === 'job-title-inner') positionMenu = !positionMenu
     if (args.ref === 'position' && !options.selectionNoChange) { selected = true; positionMenu = false; frameJobId = 'job123' }
     if (args.ref === 'card') {
@@ -184,6 +194,18 @@ async function fixture(options = {}) {
     }
     if (opts.tools[0]?.name !== 'sourcing_submit_assessments') {
       navigationCalls++; assert.equal(opts.maxTurns, 8)
+      if (options.recoverObstruction) {
+        assert.match(JSON.stringify(opts.initialToolResults), /obstruction.*先识别并处理遮挡/)
+        const click = opts.tools.find(tool => tool.name === 'browser_click')
+        const args = { tabId: 1, snapshotId: page().snapshotId, ref: 'popup-close', purpose: 'navigation' }
+        await assert.rejects(click.execute(args, opts.signal), /SOURCING_NAVIGATION_UNVERIFIED/)
+        await opts.tools.find(tool => tool.name === 'browser_inspect_element').execute({ tabId: 1, snapshotId: page().snapshotId, ref: 'popup-close' }, opts.signal)
+        await click.execute(args, opts.signal)
+        await opts.tools.find(tool => tool.name === 'browser_snapshot').execute({ tabId: 1, frameId: 0, format: 'dom' }, opts.signal)
+        assert.equal(page().dialogs.length, 0)
+        await opts.beforeTurn(opts.signal)
+        return { status: opts.isComplete() ? 'completed' : 'stopped', message: 'obstruction recovered', turns: 2, modelMs: 0, toolMs: 0 }
+      }
       if (options.recoverCanvas) {
         await opts.tools.find(tool => tool.name === 'browser_snapshot').execute({ tabId: 1, frameId: 2, format: 'dom', viewportOnly: false }, opts.signal)
         if (options.recoverySkip) await opts.tools.find(tool => tool.name === 'sourcing_skip_candidate').execute({ reason: '详情暂不可读，跳过本次人选' }, opts.signal)
@@ -227,6 +249,8 @@ test('BOSS preflights the list, opens the real resume and saves only detail text
   const f = await fixture({ selected: false })
   assert.equal(f.result.status, 'completed', JSON.stringify({ message: f.result.message, routes: f.routes, inputs: f.inputs }))
   assert.equal(f.navigationCalls, 0)
+  assert.deepEqual(f.job.candidates[0].listProfile.expectation, { city: '上海', role: 'Java工程师' })
+  assert.deepEqual(f.job.candidates[0].listProfile.education, [{ organization: '某大学', description: '计算机科学与技术 本科', period: '2014 - 2018' }])
   assert.equal(f.assessments, 2)
   assert.deepEqual(f.inputs.map(input => input.ref), ['position', 'card'])
   assert.equal(f.job.candidates.length, 1)
@@ -238,6 +262,22 @@ test('BOSS preflights the list, opens the real resume and saves only detail text
   assert.ok(f.messages.some(message => /候选人\[张先生\]已读取简历详情.*正在分析匹配度/.test(message)))
   assert.ok(!f.messages.some(message => /已读取当前候选人/.test(message)))
   assert.equal(f.routes.find(route => route.event === 'sourcing.fast_execution_finished').navigationTurns, 0)
+})
+
+test('AI can inspect and close an unnamed blocking popup, verify dismissal, and resume BOSS sourcing', async () => {
+  const f = await fixture({ recoverObstruction: true })
+  assert.equal(f.result.status, 'completed', JSON.stringify(f.routes))
+  assert.equal(f.navigationCalls, 1)
+  assert.equal(f.job.candidates.length, 1)
+  assert.equal(f.greetings, 0)
+  assert.deepEqual(f.inputs.filter(input => input.ref === 'popup-close').map(input => input.name), ['browser_click'])
+})
+
+test('an unknown popup close result stops without replaying the close or processing another candidate', async () => {
+  const f = await fixture({ recoverObstruction: true, unknownPopupClose: true, allowFailure: true })
+  assert.match(f.result.message, /OUTCOME_UNKNOWN/)
+  assert.equal(f.job.candidates.length, 0)
+  assert.equal(f.inputs.filter(input => input.ref === 'popup-close').length, 1)
 })
 
 test('BOSS Canvas detail is read through the end, transcribed once, verified again and saved as visual online evidence before greeting', async () => {
@@ -536,6 +576,33 @@ test('a stalled BOSS list hands off after two scrolls and does not run 150 repea
   assert.equal(f.assessments, 2)
   assert.ok(f.snapshots < 15, `snapshots=${f.snapshots}`)
   assert.ok(f.routes.some(route => route.reason === 'boss_list_no_progress'))
+})
+
+test('BOSS continues after a discarded resume when greeting buttons are occluded but the card entry is visible', async () => {
+  const f = await fixture({ frame: true, document: true, filterReject: true, exhaustAfterDiscard: true, occludedScrollButton: true })
+  assert.equal(f.result.status, 'completed', JSON.stringify(f.routes))
+  assert.equal(f.navigationCalls, 0)
+  assert.equal(f.job.candidates.length, 0)
+  assert.equal(f.greetings, 0)
+  assert.deepEqual(f.inputs.filter(input => input.name === 'browser_scroll').map(input => input.ref), ['name'])
+})
+
+test('BOSS scrolls from a fresh unoccluded middle card and hands off if every candidate anchor is blocked', async () => {
+  const cards = [0, 1, 2].map(i => ({ sourceId: String(i), ref: `greet-${i}`, openRef: `name-${i}`, evidenceRefs: [`name-${i}`] }))
+  const page = { url: entry, tabId: 1, snapshotId: 'fresh', viewport: { width: 1400, height: 800 },
+    items: cards.flatMap((card, i) => [
+      { ref: card.ref, states: ['occluded'], bounds: { x: 1100, y: i * 300, width: 90, height: 30 } },
+      { ref: card.openRef, states: i === 0 ? ['occluded'] : [], bounds: { x: 300, y: i === 1 ? 390 : 740, width: 90, height: 24 } },
+    ]) }
+  const calls = []
+  const broker = { currentPage: () => page, tools: [{ name: 'browser_scroll', execute: async args => { calls.push(args); return {} } }] }
+  const driver = new BossSourcingDriver({ job: {}, broker, signal: new AbortController().signal })
+  driver.cards = async () => cards
+  await driver.advance()
+  assert.equal(calls.length, 1);assert.equal(calls[0].ref, 'name-1');assert.equal(calls[0].snapshotId, 'fresh')
+  page.items.forEach(item => { item.states = ['occluded'] })
+  await assert.rejects(driver.advance(), /boss_scroll_anchor_missing/)
+  assert.equal(calls.length, 1, 'no scroll or click is dispatched against a blocked target')
 })
 
 test('BOSS name-based fixed route survives missing or changed widget IDs with no navigation inference', async () => {
